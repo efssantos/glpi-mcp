@@ -64,9 +64,9 @@ class GLPIClientTests(unittest.TestCase):
     @patch("integrations.glpi.client.request_json")
     def test_search_caps_limit_and_encodes_item_type(self, request_json):
         request_json.side_effect = [{"session_token": "s"}, []]
-        self.client.search("IT Asset", limit=500, criteria="?is_deleted=0")
+        self.client.search("IT Asset", limit=100, criteria="criteria[0][field]=1&criteria[0][searchtype]=contains&criteria[0][value]=printer")
         call = request_json.call_args_list[1]
-        self.assertEqual(call.args[0], "https://glpi.example.test/apirest.php/search/IT%20Asset?range=0-99&is_deleted=0")
+        self.assertEqual(call.args[0], "https://glpi.example.test/apirest.php/search/IT%20Asset?range=0-99&criteria%5B0%5D%5Bfield%5D=1&criteria%5B0%5D%5Bsearchtype%5D=contains&criteria%5B0%5D%5Bvalue%5D=printer")
 
     @patch("integrations.glpi.client.request_json")
     def test_create_and_update_wrap_fields_in_input(self, request_json):
