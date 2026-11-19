@@ -70,6 +70,21 @@ class GLPIToolTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "omit id"):
             update(12, {"id": 99})
 
+    def test_update_ticket_rejects_unapproved_fields_and_invalid_values(self):
+        update = self.mcp.tools["glpi_update_ticket"]
+        with self.assertRaisesRegex(ValueError, "Unsupported ticket field"):
+            update(12, {"is_deleted": 1})
+        with self.assertRaisesRegex(ValueError, "urgency must be an integer"):
+            update(12, {"urgency": 9})
+        with self.assertRaisesRegex(ValueError, "positive integer"):
+            update(0, {"name": "Changed"})
+
+    @patch("integrations.glpi.tools.GLPIClient")
+    def test_create_ticket_rejects_invalid_urgency(self, client_class):
+        with self.assertRaisesRegex(ValueError, "urgency must be an integer"):
+            self.mcp.tools["glpi_create_ticket"]("Title", "Description", urgency=0)
+        client_class.assert_not_called()
+
     def test_tools_validate_settings_before_creating_client(self):
         invalid_mcp = FakeMCP()
         register_glpi_tools(invalid_mcp, make_settings(glpi_user_token=None, glpi_username=None, glpi_password=None))
