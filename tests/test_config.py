@@ -41,11 +41,15 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.mcp_host, "127.0.0.1")
         self.assertEqual(settings.mcp_port, 8000)
 
-    def test_rejects_non_loopback_http_binding(self):
+    def test_requires_proxy_mode_for_non_loopback_http_binding(self):
         env = {"MCP_TRANSPORT": "streamable-http", "MCP_HOST": "0.0.0.0"}
         with patch.dict("os.environ", env, clear=True):
-            with self.assertRaisesRegex(ValueError, "reverse proxy"):
+            with self.assertRaisesRegex(ValueError, "MCP_PROXY_MODE=true"):
                 Settings.from_env()
+        env["MCP_PROXY_MODE"] = "true"
+        with patch.dict("os.environ", env, clear=True):
+            settings = Settings.from_env()
+        self.assertTrue(settings.mcp_proxy_mode)
 
     def test_rejects_invalid_timeout_and_port_ranges(self):
         for env in ({"GLPI_TIMEOUT": "0"}, {"MCP_PORT": "70000"}):
