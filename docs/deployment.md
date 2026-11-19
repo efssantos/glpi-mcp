@@ -1,31 +1,134 @@
-# Remote deployment on a VPS
+# Implantação do GLPI-MCP em uma VPS
 
-This deployment publishes the MCP endpoint through Caddy with automatic HTTPS. The MCP container is not published directly to the host: only Caddy exposes ports 80 and 443.
+Este guia descreve como uma pessoa pode instalar e manter sua própria instância do GLPI-MCP em uma VPS Linux, conectada à sua instância GLPI e acessível por clientes MCP remotos.
 
-## Requirements
+O resultado esperado é um endpoint HTTPS público, protegido por OAuth/OIDC, sem expor a porta interna do servidor MCP.
 
-- A Linux VPS with Docker Engine and Docker Compose v2.
-- A DNS name such as `mcp.example.com` pointing to the VPS public IP.
-- TCP ports 80 and 443 reachable from the internet (UDP 443 is optional and enables HTTP/3).
-- A reachable OIDC/OAuth authorization server that issues signed JWT access tokens.
-- A GLPI account dedicated to the integration, with least-privilege permissions.
+## 1. Entender os componentes
 
-## Configure the identity provider
+A instalação utiliza quatro componentes:
 
-The GLPI-MCP service acts as an OAuth 2.1 resource server. It does not host a login page or issue user tokens. Configure an external OIDC provider (for example, a self-hosted Keycloak realm) to:
+| Componente | Responsabilidade |
+|---|---|
+| Cliente MCP (Claude ou outro) | Envia solicitações MCP e apresenta os resultados ao usuário. |
+| Caddy | Recebe conexões públicas, gerencia certificados TLS automaticamente e encaminha o tráfego ao MCP. |
+| GLPI-MCP | Implementa as ferramentas, valida access tokens e chama a API REST do GLPI. |
+| Provedor OAuth/OIDC | Autentica usuários e emite access tokens JWT. Não faz parte do GLPI-MCP e deve ser configurado separadamente. |
 
-1. Publish an HTTPS issuer URL and a JWKS endpoint.
-2. Issue signed access tokens using RS256 or ES256.
-3. Include `iss`, `aud`, `exp`, and a `scope` (or `scp`) claim.
-4. Issue the audience configured for this MCP resource: `glpi-mcp` in the example.
-5. Grant `glpi:read` for search and item lookup; grant `glpi:write` as well for ticket creation and updates.
-6. Support the authorization-code flow with PKCE and the client-registration/discovery capabilities required by the MCP client.
+Fluxo de uma consulta:
 
-Do not use ID tokens as bearer access tokens. Configure the MCP client and identity provider to obtain an access token whose audience is the GLPI-MCP resource.
+1. O usuário solicita uma ação no cliente MCP.
+2. O cliente conecta-se a `https://SEU-DOMINIO/mcp`.
+3. Caddy recebe a conexão HTTPS e encaminha a requisição pela rede privada Docker.
+4. O GLPI-MCP valida o access token: assinatura, emissor (`iss`), audiência (`aud`) e expiração (`exp`).
+5. A ferramenta verifica os escopos exigidos.
+6. O GLPI-MCP chama a API REST com a conta técnica configurada.
+7. O GLPI aplica as permissões dessa conta e retorna os dados.
+8. O resultado volta ao cliente MCP pelo mesmo caminho.
 
-## Configure the VPS
+O GLPI-MCP não hospeda uma página de login, não cadastra usuários e não emite tokens. Ele é o servidor de recursos OAuth (resource server). O servidor de autorização/IdP é uma dependência externa.
 
-Clone the repository and create the environment file:
+## 2. Requisitos antes de começar
+
+Você precisa de:
+
+- VPS Linux com acesso administrativo (sudo).
+- Docker Engine e Docker Compose v2.
+- Domínio ou subdomínio sob seu controle, por exemplo `mcp.exemplo.com`.
+- Acesso ao painel DNS do domínio.
+- Instância GLPI acessível pela Internet ou pela rede privada da VPS.
+- App-Token e User Token (ou usuário/senha) de uma conta técnica GLPI.
+- Provedor OAuth/OIDC acessível por HTTPS, capaz de emitir JWT access tokens assinados e publicar JWKS.
+- Cliente MCP compatível com o transporte Streamable HTTP e com o fluxo OAuth esperado.
+
+Use uma conta GLPI exclusiva para integração. Não utilize a conta pessoal de um administrador.
+
+## 3. Preparar a VPS e o DNS
+
+### 3.1 Instalar Docker
+
+Instale Docker Engine e o plugin Docker Compose v2 seguindo a documentação oficial da distribuição ou do Docker. Confirme:
+
+```bash
+docker --version
+docker compose version
+```
+
+O comando `docker compose version` deve funcionar sem hífen entre docker e compose.
+
+### 3.2 Configurar DNS
+
+No painel DNS do domínio, crie:
+
+- Registro `A`: nome `mcp` apontando para o IPv4 público da VPS.
+- Registro `AAAA`: somente se a VPS tiver IPv6 funcional e o firewall IPv6 estiver configurado corretamente.
+
+Exemplo: `mcp.exemplo.com` → `203.0.113.10`.
+
+Aguarde a propagação e confira:
+
+```bash
+dig +short mcp.exemplo.com A
+dig +short mcp.exemplo.com AAAA
+```
+
+O endereço retornado deve corresponder à VPS. Se não usar IPv6, remova um registro AAAA incorreto; um AAAA apontando para outro servidor pode impedir a validação TLS.
+
+### 3.3 Configurar firewall
+
+Libere entrada TCP 80 e TCP 443 no firewall do sistema e no firewall/regras de rede do provedor da VPS.
+
+Exemplo com UFW:
+
+```bash
+sudo ufw allow OpenSSH
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw status
+```
+
+UDP 443 é opcional para HTTP/3. O Compose atual publica essa porta; se não quiser HTTP/3, remova a linha `443:443/udp` de `compose.yaml`.
+
+**Não libere a porta 8000.** Ela é usada somente entre Caddy e GLPI-MCP na rede Docker.
+
+## 4. Preparar o provedor OAuth/OIDC
+
+Esta etapa é obrigatória para o acesso remoto. O GLPI-MCP não substitui um provedor de identidade. Você pode usar um serviço de identidade gerenciado ou hospedar uma solução como Keycloak, desde que ela atenda aos requisitos abaixo.
+
+Configure o provedor para:
+
+1. Publicar metadados de autorização OAuth/OIDC por HTTPS.
+2. Publicar um endpoint JWKS HTTPS com as chaves públicas de assinatura.
+3. Emitir **access tokens JWT** assinados com RS256 ou ES256.
+4. Incluir os claims `iss`, `aud` e `exp`.
+5. Incluir os escopos em `scope` (texto separado por espaços) ou `scp` (lista de textos).
+6. Emitir a audiência destinada ao GLPI-MCP, igual ao valor configurado em `OIDC_AUDIENCE`.
+7. Permitir que o cliente MCP obtenha um access token para esse recurso. O fluxo de autorização, PKCE, descoberta de metadados e registro de cliente deve ser compatível com o cliente utilizado.
+
+Escopos recomendados:
+
+- `glpi:read`: pesquisa e consulta.
+- `glpi:write`: criação e atualização de chamados. As ferramentas de escrita também exigem `glpi:read`.
+
+O token precisa conter os dois escopos para executar operações de escrita. Não use um ID token como bearer token. ID token identifica uma sessão/autenticação para o cliente; o GLPI-MCP espera um access token destinado ao recurso.
+
+### Valores que você precisa obter no provedor
+
+Guarde estes valores para configurar o GLPI-MCP:
+
+- URL exata do issuer (`iss`).
+- URL HTTPS do endpoint JWKS.
+- Audience que será incluída nos access tokens.
+- Mapeamento de escopos para usuários/clientes.
+- Configuração de cliente/registro e redirect URI exigida pelo cliente MCP.
+
+O GLPI-MCP valida tokens e escopos, mas não administra o cadastro de usuários ou a concessão de escopos. Faça essas tarefas no provedor de identidade.
+
+> **Compatibilidade:** nem todo provedor OIDC ou cliente MCP implementa os mesmos mecanismos de descoberta e registro dinâmico. Antes de disponibilizar o serviço a usuários, valide o fluxo completo entre o cliente escolhido e seu provedor. A configuração de issuer/JWKS, isoladamente, não comprova que o login remoto funcionará.
+
+## 5. Baixar e configurar o GLPI-MCP
+
+Conecte-se à VPS por SSH e execute:
 
 ```bash
 git clone https://github.com/efssantos/glpi-mcp.git
@@ -33,66 +136,201 @@ cd glpi-mcp
 cp .env.example .env
 ```
 
-Edit `.env` and configure at least:
+Edite o arquivo:
 
-```dotenv
-GLPI_URL=https://glpi.example.com
-GLPI_APP_TOKEN=your-glpi-app-token
-GLPI_USER_TOKEN=your-glpi-user-token
-
-MCP_DOMAIN=mcp.example.com
-MCP_PUBLIC_URL=https://mcp.example.com/mcp
-OIDC_ISSUER_URL=https://identity.example.com/realms/glpi
-OIDC_JWKS_URL=https://identity.example.com/realms/glpi/protocol/openid-connect/certs
-OIDC_AUDIENCE=glpi-mcp
-MCP_READ_SCOPE=glpi:read
-MCP_WRITE_SCOPE=glpi:write
+```bash
+nano .env
 ```
 
-Use the exact issuer and JWKS URLs published by your identity provider. Configure its access-token audience to match `OIDC_AUDIENCE`. Keep `.env` private and never commit it.
+Preencha os valores. Exemplo:
 
-## Start the services
+```dotenv
+# Instância GLPI e conta técnica
+GLPI_URL=https://glpi.exemplo.com
+GLPI_API_PATH=/apirest.php
+GLPI_APP_TOKEN=COLOQUE_SEU_APP_TOKEN
+GLPI_USER_TOKEN=COLOQUE_SEU_USER_TOKEN
+GLPI_TIMEOUT=30
+GLPI_VERIFY_TLS=true
+
+# Domínio público do MCP
+MCP_DOMAIN=mcp.exemplo.com
+MCP_PUBLIC_URL=https://mcp.exemplo.com/mcp
+
+# Provedor OAuth/OIDC
+OIDC_ISSUER_URL=https://identity.exemplo.com/realms/glpi
+OIDC_JWKS_URL=https://identity.exemplo.com/realms/glpi/protocol/openid-connect/certs
+OIDC_AUDIENCE=glpi-mcp
+
+# Escopos exigidos pelo servidor
+MCP_READ_SCOPE=glpi:read
+MCP_WRITE_SCOPE=glpi:write
+
+LOG_LEVEL=INFO
+```
+
+Substitua todos os exemplos pelos endereços e credenciais reais. Os caminhos de issuer e JWKS variam conforme o provedor; copie os valores exatos publicados por ele. O valor de `OIDC_AUDIENCE` deve coincidir com a audiência dos access tokens.
+
+O Compose define o modo remoto, ativa a autenticação e configura a escuta interna do servidor. Não é necessário alterar manualmente `MCP_TRANSPORT`, `MCP_HOST`, `MCP_PROXY_MODE` ou `MCP_AUTH_ENABLED` para essa implantação.
+
+Proteja o arquivo:
+
+```bash
+chmod 600 .env
+```
+
+Nunca publique o arquivo em repositórios ou envie credenciais em chamados/logs.
+
+## 6. Iniciar a aplicação
+
+Na pasta do repositório:
 
 ```bash
 docker compose up -d --build
+```
+
+Verifique o estado dos serviços:
+
+```bash
 docker compose ps
+```
+
+Acompanhe os logs:
+
+```bash
 docker compose logs -f caddy glpi-mcp
 ```
 
-Caddy obtains and renews the TLS certificate automatically after DNS and firewall prerequisites are met. Persistent Docker volumes retain Caddy's certificate and configuration data.
+O Compose inicia dois contêineres:
 
-The public MCP endpoint is:
+- `caddy`: publica TCP 80/443 e gerencia HTTPS.
+- `glpi-mcp`: executa o servidor MCP na porta 8000, sem publicar essa porta no host.
+
+Quando DNS e firewall estiverem corretos, Caddy solicita automaticamente o certificado TLS e renova-o. O endpoint público será:
 
 ```text
-https://mcp.example.com/mcp
+https://mcp.exemplo.com/mcp
 ```
 
-The protected-resource metadata is published by the MCP SDK and points clients to the configured authorization-server issuer. Unauthenticated MCP requests are rejected with HTTP 401.
+## 7. Entender as portas
 
-## Network model
+| Porta | Protocolo | Direção | Finalidade |
+|---|---|---|---|
+| 80 | TCP | Entrada pública | Validação Let's Encrypt e redirecionamento HTTP para HTTPS. |
+| 443 | TCP | Entrada pública | Conexões HTTPS dos clientes MCP. |
+| 443 | UDP | Entrada pública, opcional | HTTP/3. |
+| 8000 | TCP | Rede Docker privada | Proxy Caddy encaminha chamadas para o GLPI-MCP. Nunca publicar no host. |
+| 443 | TCP | Saída | API GLPI e endpoints HTTPS OIDC/JWKS. |
+| 53 | UDP/TCP | Saída | Resolução DNS, conforme o resolvedor configurado. |
 
-- Caddy is the only service publishing host ports (80 and 443).
-- The MCP service has no published host port.
-- Caddy and MCP communicate over the private `backend` Docker network.
-- MCP has a separate egress network to reach the GLPI API.
-- The VPS firewall should allow inbound TCP 80/443 only (and UDP 443 if HTTP/3 is desired). Do not open port 8000.
+A VPS também precisa alcançar a instância GLPI e o provedor OIDC. Se algum desses serviços estiver em porta ou rede diferente, permita somente o destino necessário.
 
-## Operational checks
+No modo local `stdio`, não há portas de entrada. A tabela acima descreve a implantação remota em VPS.
+
+## 8. Validar a implantação
+
+### 8.1 Verificar os contêineres
 
 ```bash
 docker compose ps
 docker compose logs --tail 100 glpi-mcp
 docker compose logs --tail 100 caddy
+```
+
+Ambos os serviços devem estar em execução. Corrija erros de configuração antes de seguir.
+
+### 8.2 Verificar HTTPS
+
+De um computador externo à VPS:
+
+```bash
+curl -I https://mcp.exemplo.com
+```
+
+Confirme que o domínio resolve para a VPS e que o certificado apresentado é válido. A resposta HTTP da raiz pode variar; o objetivo deste teste é verificar conectividade TLS. O endpoint MCP é `/mcp`.
+
+### 8.3 Verificar autenticação
+
+Faça uma requisição ao endpoint sem token. O acesso não autenticado deve ser recusado (HTTP 401 ou desafio de autenticação equivalente).
+
+Depois, use o cliente MCP configurado para autenticar pelo provedor e obter um access token correto. Um teste manual com um token deve usar um access token JWT, com issuer, audience, expiração e escopos válidos.
+
+### 8.4 Verificar as ferramentas
+
+Conecte o cliente MCP ao endereço:
+
+```text
+https://mcp.exemplo.com/mcp
+```
+
+Conclua a autenticação. Confirme que as ferramentas `glpi_search`, `glpi_get_item`, `glpi_create_ticket` e `glpi_update_ticket` aparecem. Comece com uma consulta de leitura. Só depois teste criação/atualização em um ambiente controlado.
+
+## 9. Conceder acesso aos usuários
+
+A autorização tem duas camadas independentes:
+
+1. **OAuth/OIDC:** o access token precisa conter os escopos requeridos pelo GLPI-MCP.
+2. **GLPI:** a conta técnica configurada no servidor precisa ter permissão para a ação solicitada.
+
+| Operação | Escopos do token | Permissão GLPI |
+|---|---|---|
+| Pesquisar ou consultar | `glpi:read` | Leitura do tipo de item correspondente. |
+| Criar chamado | `glpi:read` + `glpi:write` | Criar chamados. |
+| Atualizar chamado | `glpi:read` + `glpi:write` | Atualizar os campos permitidos. |
+
+Como a integração usa uma conta técnica configurada no servidor, as operações dos clientes remotos são executadas com as permissões dessa conta no GLPI. Os escopos distinguem o que cada token pode solicitar, mas não transformam a conta técnica em usuários individuais do GLPI.
+
+## 10. Operação e atualização
+
+Ver status e logs:
+
+```bash
+docker compose ps
+docker compose logs --tail 100 glpi-mcp caddy
+```
+
+Reiniciar:
+
+```bash
 docker compose restart
 ```
 
-Verify that the endpoint presents a valid certificate and that the OIDC discovery/JWKS endpoints are reachable from the MCP container. Test both an unauthenticated request (must be rejected) and an authenticated request with the appropriate scope.
+Atualizar o código da branch implantada:
 
-## Security notes
+```bash
+git pull
+docker compose up -d --build
+```
 
-- Use a dedicated GLPI integration account and restrict its permissions.
-- Rotate GLPI tokens and OIDC signing keys according to your organization's policy.
-- Restrict write scopes to trusted users or clients.
-- Back up the `caddy_data` volume and protect the `.env` file.
-- Keep Docker, Caddy, the MCP image, and the identity provider updated.
-- HTTPS encrypts traffic; OAuth token validation and per-tool scopes provide identity and authorization. Neither replaces least-privilege permissions in GLPI.
+Antes de atualizar em produção, leia as notas de versão e faça backup de configurações e dados persistentes.
+
+### Backups
+
+Os volumes `caddy_data` e `caddy_config` guardam certificados e dados de configuração do Caddy. Faça backup seguro desses volumes. Mantenha também uma cópia protegida do `.env`; ela contém credenciais e não deve ficar em backup público.
+
+## 11. Segurança operacional
+
+- Não exponha TCP 8000.
+- Não desative a validação TLS do GLPI em produção.
+- Restrinja os escopos de escrita aos usuários que realmente precisam deles.
+- Proteja o acesso administrativo à VPS e mantenha o sistema atualizado.
+- Rotacione tokens GLPI e chaves/segredos do provedor conforme a política adotada.
+- Monitore logs e falhas de autenticação.
+- Faça backup e teste a restauração.
+- Se o provedor OIDC ficar indisponível, novas validações de tokens podem falhar; planeje a disponibilidade dessa dependência.
+
+## 12. Remover a instalação
+
+Na pasta do projeto:
+
+```bash
+docker compose down
+```
+
+Para remover também os volumes persistentes (incluindo dados/certificados do Caddy):
+
+```bash
+docker compose down -v
+```
+
+O segundo comando é destrutivo. Execute-o somente se realmente quiser apagar os dados persistidos pelo Compose.
