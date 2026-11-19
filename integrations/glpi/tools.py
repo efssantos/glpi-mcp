@@ -27,7 +27,7 @@ def _positive_id(value: int | None, field_name: str) -> None:
         raise ValueError(f"{field_name} must be a positive integer.")
 
 
-def _validate_ticket_fields(fields: dict[str, Any], *, allow_partial: bool) -> None:
+def _validate_ticket_fields(fields: dict[str, Any]) -> None:
     if not isinstance(fields, dict) or not fields:
         raise ValueError("Provide at least one ticket field.")
     unknown = set(fields) - UPDATEABLE_TICKET_FIELDS
@@ -61,6 +61,8 @@ def register_glpi_tools(mcp: Any, settings: Settings) -> None:
         validate_glpi_settings(settings)
         if not isinstance(itemtype, str) or not itemtype.strip() or len(itemtype) > 100:
             raise ValueError("itemtype must be non-empty text with at most 100 characters.")
+        if not isinstance(criteria, str):
+            raise ValueError("criteria must be text.")
         client = GLPIClient(settings)
         try:
             return client.search(itemtype, criteria=criteria, limit=limit)
@@ -91,7 +93,7 @@ def register_glpi_tools(mcp: Any, settings: Settings) -> None:
             fields["itilcategories_id"] = itilcategories_id
         if entities_id is not None:
             fields["entities_id"] = entities_id
-        _validate_ticket_fields(fields, allow_partial=False)
+        _validate_ticket_fields(fields)
         client = GLPIClient(settings)
         try:
             return client.create("Ticket", fields)
@@ -103,9 +105,11 @@ def register_glpi_tools(mcp: Any, settings: Settings) -> None:
         """Update an allowlisted set of fields on an existing GLPI ticket."""
         validate_glpi_settings(settings)
         _positive_id(ticket_id, "ticket_id")
+        if not isinstance(fields, dict):
+            raise ValueError("fields must be an object containing ticket fields.")
         if "id" in fields:
             raise ValueError("The ticket ID is supplied separately; omit id from fields.")
-        _validate_ticket_fields(fields, allow_partial=True)
+        _validate_ticket_fields(fields)
         client = GLPIClient(settings)
         try:
             return client.update("Ticket", ticket_id, fields)
