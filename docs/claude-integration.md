@@ -1,47 +1,100 @@
-# Connect Claude to a remote GLPI-MCP server
+# Conectar o Claude ao GLPI-MCP remoto
 
-This guide connects Claude to a GLPI-MCP instance deployed on a VPS. The server must already be reachable through a valid HTTPS certificate and configured with an OIDC authorization server. See [VPS deployment](deployment.md) first.
+Este guia explica como conectar um cliente Claude a uma instância GLPI-MCP hospedada em uma VPS. Antes de configurar o Claude, conclua o [guia de implantação em VPS](deployment.md).
 
-## Before connecting
+## 1. O que precisa estar pronto
 
-Have the following information ready:
+- GLPI-MCP em execução na VPS.
+- Endpoint público com certificado HTTPS válido, por exemplo `https://mcp.exemplo.com/mcp`.
+- Provedor OAuth/OIDC configurado e acessível por HTTPS.
+- Access tokens JWT com issuer, audience, expiração e escopos compatíveis.
+- Provedor configurado para o fluxo OAuth esperado pelo cliente Claude, incluindo descoberta/registro de cliente quando aplicável.
+- Usuário autorizado no provedor para obter os escopos necessários.
 
-- Public MCP endpoint, for example `https://mcp.example.com/mcp`.
-- OIDC issuer URL configured in `OIDC_ISSUER_URL`.
-- A client registration in the identity provider, or an authorization server that supports the registration flow required by the Claude connector.
-- Access-token audience matching `OIDC_AUDIENCE`.
-- The scopes the user should receive: `glpi:read` for read-only access and `glpi:write` for ticket changes.
+O GLPI-MCP não realiza o login do usuário, não emite tokens e não armazena contas individuais do Claude. O login ocorre no provedor de identidade. O GLPI-MCP recebe e valida o access token apresentado pelo cliente.
 
-The access token must be a signed JWT access token (not an ID token) containing the configured issuer, audience, expiry, and scope claims. The MCP service verifies its signature using the configured JWKS endpoint.
+## 2. Entender o fluxo de autenticação
 
-## Add the remote connector
+1. O usuário adiciona o endpoint remoto no Claude.
+2. O Claude inicia o fluxo OAuth com o servidor de autorização configurado.
+3. O usuário autentica-se no provedor e autoriza o acesso solicitado.
+4. O provedor emite um access token JWT.
+5. O Claude envia solicitações MCP com esse token para o endpoint HTTPS.
+6. O GLPI-MCP valida assinatura, issuer, audience, expiração e escopos.
+7. Se o token for válido e tiver o escopo exigido, a ferramenta é executada usando a conta técnica GLPI configurada na VPS.
 
-1. Open Claude's connector/custom integration settings for the account or workspace.
-2. Add a remote MCP connector using the HTTPS endpoint shown above.
-3. Select the OAuth authentication flow when prompted.
-4. Complete the identity-provider sign-in and consent flow.
-5. Grant only the scopes required for the user's tasks.
-6. Save the connector and verify that the GLPI tools are listed in the conversation.
+Não confunda access token com ID token. O GLPI-MCP espera um **access token JWT** destinado à audiência configurada em `OIDC_AUDIENCE`.
 
-The exact labels and availability of connector settings depend on the Claude product, plan, and workspace policy. If the connector cannot complete OAuth discovery or registration, verify that the configured authorization server publishes standard OAuth metadata and supports the client-registration method expected by Claude.
+## 3. Escopos disponíveis
 
-## Scope model
+| Escopo | Ferramentas | Permissão |
+|---|---|---|
+| `glpi:read` | `glpi_search`, `glpi_get_item` | Pesquisa e consulta. |
+| `glpi:write` | `glpi_create_ticket`, `glpi_update_ticket` | Criação e atualização; também exige `glpi:read`. |
 
-| Scope | Permitted tools |
+Conceda somente os escopos necessários. Além dos escopos, a conta técnica GLPI precisa ter as permissões correspondentes.
+
+## 4. Cadastrar o conector remoto no Claude
+
+Os nomes e a disponibilidade das opções variam conforme o produto Claude, o plano e as políticas do workspace. Em termos gerais:
+
+1. Abra as configurações de conectores ou integrações personalizadas do Claude.
+2. Escolha adicionar um conector MCP remoto.
+3. Informe o endpoint HTTPS completo, incluindo `/mcp`.
+4. Selecione ou conclua a autenticação OAuth quando solicitada.
+5. Faça login no provedor de identidade.
+6. Autorize somente os escopos necessários.
+7. Salve a conexão.
+8. Abra uma conversa e confirme se as ferramentas GLPI aparecem disponíveis.
+
+Endpoint de exemplo:
+
+```text
+https://mcp.exemplo.com/mcp
+```
+
+Não use o endereço HTTP sem TLS nem a porta interna 8000.
+
+## 5. Validar com segurança
+
+Comece com uma operação de leitura, por exemplo pesquisar um chamado conhecido. Verifique:
+
+- O conector aparece como conectado.
+- As quatro ferramentas são apresentadas pelo cliente.
+- Uma consulta com `glpi:read` funciona.
+- Uma operação de escrita só é permitida quando o token possui `glpi:write` e a conta GLPI tem a permissão necessária.
+
+Teste criação e atualização em ambiente controlado, nunca em chamados de produção sem autorização.
+
+## 6. Problemas comuns
+
+| Sintoma | Causa provável / ação |
 |---|---|
-| `glpi:read` | `glpi_search`, `glpi_get_item` |
-| `glpi:write` | `glpi_create_ticket`, `glpi_update_ticket` (also requires `glpi:read`) |
+| Claude não conclui OAuth | Verifique descoberta de metadados, registro de cliente, redirect URI e compatibilidade do provedor com o fluxo esperado pelo Claude. |
+| Endpoint inacessível | Verifique DNS, certificado, TCP 443, Caddy e o caminho `/mcp`. |
+| HTTP 401 | Token ausente, expirado, assinatura inválida, issuer/audience incorretos ou token não é access token. |
+| Ferramentas de leitura funcionam, escrita falha | O token não tem `glpi:write` ou a conta técnica não tem permissão no GLPI. |
+| Ferramentas não aparecem | Confira endpoint, transporte Streamable HTTP, logs do GLPI-MCP e compatibilidade do cliente. |
 
-The MCP resource server requires `glpi:read` on every authenticated token. Write operations additionally require `glpi:write`. GLPI's own account permissions remain in force, so OAuth scopes do not grant permissions that the configured GLPI account does not have.
+Logs na VPS:
 
-## Troubleshooting
+```bash
+docker compose logs --tail 100 glpi-mcp caddy
+```
 
-- **OAuth discovery fails:** verify that the issuer URL is correct and that its authorization-server metadata is publicly reachable over HTTPS.
-- **Token rejected:** check the JWT signature algorithm, issuer, audience, expiration, and JWKS URL. Confirm that the client obtained an access token rather than an ID token.
-- **Read tools work but ticket changes fail:** request the `glpi:write` scope and confirm that the GLPI integration account can create or update tickets.
-- **TLS error:** check DNS, firewall rules for ports 80/443, and Caddy logs.
-- **Tools are unavailable:** check `docker compose logs glpi-mcp caddy` and confirm the connector uses the exact `/mcp` endpoint.
+## 7. Limites e compatibilidade
 
-## Local Claude Desktop
+O GLPI-MCP implementa validação de bearer access tokens JWT via JWKS e autorização por escopos. Isso não significa que ele implemente um servidor de autorização completo. Login, consentimento, emissão de tokens, cadastro de usuários e registro do cliente são responsabilidades do provedor OAuth/OIDC e do cliente MCP.
 
-For a Claude Desktop process running on the same computer as GLPI-MCP, keep using the local `stdio` configuration in the main README. The remote OAuth deployment is intended for clients that connect over HTTPS; it does not replace or disable `stdio`.
+A configuração correta de `OIDC_ISSUER_URL`, `OIDC_JWKS_URL` e `OIDC_AUDIENCE` é necessária, mas não garante por si só que o Claude consiga completar a negociação OAuth. Valide o fluxo ponta a ponta com o provedor e a versão do Claude que serão usados antes de colocar o serviço em produção.
+
+## 8. Claude Desktop local
+
+Se o Claude Desktop e o GLPI-MCP estiverem na mesma máquina, a alternativa mais simples é executar localmente por `stdio`. Nesse caso:
+
+- Não é necessário publicar domínio nem configurar Caddy.
+- Não é necessário abrir portas de entrada.
+- O Claude inicia o processo GLPI-MCP localmente.
+- As credenciais GLPI ficam na máquina que executa o servidor.
+
+Consulte a seção de configuração local do [README](../README.md).
