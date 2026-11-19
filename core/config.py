@@ -1,7 +1,9 @@
 """Environment based configuration for the MCP server."""
 
 from dataclasses import dataclass
+import math
 import os
+from urllib.parse import urlsplit
 
 
 @dataclass(frozen=True)
@@ -30,8 +32,14 @@ class Settings:
 
         transport = os.getenv("MCP_TRANSPORT", "stdio").strip().lower()
         host = os.getenv("MCP_HOST", "127.0.0.1").strip()
-        if timeout <= 0:
-            raise ValueError("GLPI_TIMEOUT must be greater than zero.")
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("GLPI_TIMEOUT must be a finite number greater than zero.")
+        if url:
+            parsed_url = urlsplit(url)
+            if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+                raise ValueError("GLPI_URL must be an absolute HTTP or HTTPS URL.")
+            if parsed_url.username or parsed_url.password:
+                raise ValueError("Do not embed credentials in GLPI_URL; use the token or credential environment variables.")
         if not 1 <= port <= 65535:
             raise ValueError("MCP_PORT must be between 1 and 65535.")
         if transport not in {"stdio", "streamable-http"}:
