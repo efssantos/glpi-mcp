@@ -228,6 +228,7 @@ docker run -d \
   --env-file .env \
   -e MCP_TRANSPORT=streamable-http \
   -e MCP_HOST=0.0.0.0 \
+  -e MCP_PROXY_MODE=true \
   -p 127.0.0.1:8000:8000 \
   glpi-mcp:local
 ```
