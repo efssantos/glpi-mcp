@@ -29,6 +29,21 @@ O servidor oferece dois modos de transporte:
 - **stdio**: recomendado quando o cliente MCP inicia o servidor como um processo local.
 - **Streamable HTTP**: recomendado para execução como serviço, acessível por um cliente remoto ou por um proxy reverso.
 
+### Qual modo devo escolher?
+
+A escolha depende de onde o servidor será executado e de quem precisa acessá-lo:
+
+| Cenário | Transporte recomendado | Motivo |
+|---|---|---|
+| Uso individual no computador, por exemplo com Claude Desktop | **stdio (local)** | O próprio cliente inicia o processo. Não precisa abrir porta nem publicar um serviço de rede. |
+| Desenvolvimento e testes na máquina do desenvolvedor | **stdio (local)** | Configuração simples e comunicação direta entre o cliente e o processo. |
+| GLPI MCP hospedado em uma VM ou servidor | **Streamable HTTP** | O MCP fica em execução como serviço e pode ser acessado por clientes remotos. |
+| Vários usuários ou clientes precisam acessar uma instalação central | **Streamable HTTP** | Centraliza a execução e a manutenção do servidor. Cada cliente precisa ser autenticado e autorizado conforme a arquitetura adotada. |
+| Ambiente com proxy reverso e domínio HTTPS | **Streamable HTTP** | Permite publicar o endpoint por meio de um proxy, com TLS e controles de acesso. |
+| Ambiente sem necessidade de acesso remoto | **stdio (local)** | Evita manter uma porta HTTP aberta. |
+
+**Regra prática:** use stdio quando o assistente e o processo MCP estiverem na mesma máquina e o cliente puder iniciar o processo. Use Streamable HTTP quando o MCP precisar ficar hospedado e ser acessado pela rede. Os dois modos oferecem as mesmas ferramentas; o que muda é a forma de comunicação.
+
 ## Pré-requisitos
 
 Para execução local:
@@ -283,6 +298,91 @@ Se a imagem já foi construída e o arquivo `.env` está em um caminho conhecido
 Quando o servidor estiver publicado com HTTPS e protegido por autenticação, configure o cliente MCP para usar o endpoint remoto `https://SEU-DOMINIO/mcp`. A forma exata de cadastrar um servidor HTTP varia conforme o cliente. Não use HTTP sem TLS em redes não confiáveis.
 
 Após conectar, confirme no cliente se as ferramentas do GLPI foram carregadas. Reinicie o cliente após alterar sua configuração.
+
+## Validar a instalação Streamable HTTP
+
+Depois de iniciar o contêiner, faça os testes abaixo na própria máquina em que o serviço está hospedado. Os exemplos consideram a porta local `127.0.0.1:8000` e o endpoint `/mcp`.
+
+### 1. Verificar se o contêiner está em execução
+
+```bash
+docker ps --filter name=glpi-mcp
+docker logs --tail 50 glpi-mcp
+```
+
+Confirme que o contêiner está ativo e que os logs não mostram erros de inicialização.
+
+### 2. Inicializar uma sessão MCP
+
+Envie uma requisição JSON-RPC de inicialização:
+
+```bash
+curl -i \
+  -X POST http://127.0.0.1:8000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+      "protocolVersion": "2025-03-26",
+      "capabilities": {},
+      "clientInfo": {
+        "name": "glpi-mcp-test",
+        "version": "1.0.0"
+      }
+    }
+  }'
+```
+
+A resposta esperada é `HTTP/1.1 200 OK`, com `content-type: text/event-stream`, um cabeçalho `mcp-session-id` e um evento `message` contendo os dados de inicialização. Anote o valor de `mcp-session-id` retornado: ele será usado nas próximas requisições.
+
+### 3. Informar que o cliente concluiu a inicialização
+
+Substitua `SEU_SESSION_ID` pelo identificador recebido no passo anterior:
+
+```bash
+curl -i \
+  -X POST http://127.0.0.1:8000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "MCP-Session-Id: SEU_SESSION_ID" \
+  -H "MCP-Protocol-Version: 2025-03-26" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "notifications/initialized"
+  }'
+```
+
+Essa notificação não possui `id`, pois não espera uma resposta JSON-RPC com resultado.
+
+### 4. Listar as ferramentas disponíveis
+
+Use o mesmo identificador de sessão:
+
+```bash
+curl -i \
+  -X POST http://127.0.0.1:8000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "MCP-Session-Id: SEU_SESSION_ID" \
+  -H "MCP-Protocol-Version: 2025-03-26" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/list",
+    "params": {}
+  }'
+```
+
+A resposta esperada é `HTTP 200` e um evento contendo `result.tools`. Confira se a lista inclui as ferramentas esperadas, como `glpi_search`, `glpi_get_item`, `glpi_create_ticket` e `glpi_update_ticket`.
+
+### 5. Fazer uma consulta real ao GLPI
+
+Depois de confirmar que as ferramentas aparecem em `tools/list`, conecte um cliente MCP (por exemplo, Claude Desktop) e execute uma consulta de leitura, como uma pesquisa de registros. O resultado depende da conectividade com o GLPI, das credenciais configuradas e das permissões da conta de integração.
+
+> **Importante:** um `GET /mcp` simples não realiza a inicialização do protocolo. Se ele retornar `406 Not Acceptable` com a mensagem `Client must accept text/event-stream`, isso indica que o cabeçalho `Accept: text/event-stream` não foi enviado. Use o fluxo de inicialização por `POST` mostrado acima. Se a sessão expirar ou o servidor for reiniciado, inicialize uma nova sessão e use o novo identificador.
 
 ## Ferramentas disponíveis
 
