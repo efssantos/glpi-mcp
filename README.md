@@ -256,6 +256,32 @@ Para disponibilizar o GLPI-MCP na Internet com HTTPS, use o Docker Compose inclu
 - Uma instância GLPI acessível pela VPS.
 - Um provedor de identidade OIDC configurado para emitir access tokens JWT.
 
+### Portas necessárias
+
+A necessidade de portas depende do modo de execução:
+
+| Porta | Protocolo | Direção / exposição | Finalidade |
+|---|---|---|---|
+| 80 | TCP | Entrada pública na VPS | Necessária para o Caddy validar e emitir certificados TLS via Let's Encrypt e redirecionar HTTP para HTTPS. |
+| 443 | TCP | Entrada pública na VPS | Acesso HTTPS ao endpoint MCP. |
+| 443 | UDP | Entrada pública na VPS, opcional | HTTP/3 no Caddy. O serviço continua funcionando sem essa porta, usando HTTPS sobre TCP. |
+| 8000 | TCP | Somente rede Docker interna | Comunicação entre Caddy e GLPI-MCP. **Não publique essa porta no host nem a libere no firewall da VPS.** |
+| 443 | TCP | Saída da VPS | Acesso HTTPS à API do GLPI e aos endpoints OIDC/JWKS, quando hospedados com HTTPS. |
+| 53 | UDP/TCP | Saída da VPS, conforme o resolvedor | Resolução DNS do domínio, GLPI e provedor OIDC. Normalmente já é permitida pelo provedor de hospedagem. |
+
+No modo local \x60stdio\x60, o GLPI-MCP não precisa abrir nenhuma porta de entrada. Na implantação remota com HTTPS, exponha publicamente somente TCP 80 e TCP 443 (e, opcionalmente, UDP 443). A porta 8000 é interna ao Compose.
+
+Em servidores que usam UFW, por exemplo, as regras de entrada podem ser configuradas assim:
+
+\x60\x60\x60bash
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw allow 443/udp
+sudo ufw status
+\x60\x60\x60
+
+A regra UDP 443 é opcional. Não adicione uma regra pública para a porta 8000.
+
 ### 2. Preparar o domínio e baixar o projeto
 
 Configure o DNS antes de iniciar o Caddy. Depois, conecte-se à VPS e execute:
