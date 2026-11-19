@@ -174,7 +174,7 @@ Esse comando é apropriado para ser usado como processo iniciado pelo cliente MC
 
 ### Modo Streamable HTTP (serviço)
 
-Para executar o servidor como serviço HTTP, configure `MCP_TRANSPORT=streamable-http` e faça o processo escutar em `0.0.0.0) dentro do contêiner. Exemplo:
+Para executar o servidor como serviço HTTP, configure `MCP_TRANSPORT=streamable-http` e faça o processo escutar em `0.0.0.0` dentro do contêiner. Exemplo:
 
 ```bash
 docker run -d \
