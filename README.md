@@ -195,6 +195,7 @@ docker run -d \\
   --restart unless-stopped \\
   --env-file .env \\
   -e MCP_HOST=0.0.0.0 \\
+  -e MCP_PROXY_MODE=true \\
   -p 127.0.0.1:8000:8000 \\
   ghcr.io/efssantos/glpi-mcp:latest
 ```
