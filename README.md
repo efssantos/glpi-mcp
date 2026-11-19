@@ -422,8 +422,12 @@ O GitHub Actions executa a suíte em Python 3.11 e 3.12 nos eventos configurados
 - Use uma conta técnica dedicada no GLPI e aplique o princípio do menor privilégio.
 - Nunca versione `.env`, tokens, senhas ou arquivos com credenciais.
 - Mantenha a validação TLS habilitada em produção.
-- Não exponha o endpoint MCP diretamente à Internet sem uma camada de autenticação e autorização.
+- Não exponha o endpoint MCP diretamente à Internet nem publique a porta do contêiner em interfaces de rede públicas.
+- Em `streamable-http`, mantenha o MCP escutando em loopback (`MCP_HOST=127.0.0.1`) e publique-o somente por um proxy reverso.
+- Configure o proxy com HTTPS obrigatório, autenticação de cada cliente, autorização por usuário/grupo, limites de requisição e logs de auditoria.
+- Restrinja por firewall/rede o acesso à porta local do MCP para que somente o proxy possa alcançá-la. Não confie apenas em um cabeçalho de identidade enviado pelo cliente.
 - HTTPS protege o tráfego, mas, por si só, não identifica nem autoriza quem pode invocar as ferramentas.
+- O servidor MCP não implementa autenticação HTTP própria nesta versão; a implantação em rede depende dos controles do proxy. O modo `stdio` continua sendo apropriado para execução local.
 - Revogue e gere novamente qualquer token que tenha sido exposto.
 
 ## Licença
