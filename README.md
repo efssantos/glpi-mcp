@@ -156,7 +156,37 @@ Quando o servidor estiver no modo `stdio`, ele é iniciado pelo cliente MCP. Nã
 
 ## Executar com Docker
 
-Certifique-se de que o arquivo `.env` esteja preenchido. Construa a imagem na raiz do repositório:
+### Usar imagem publicada (GHCR)
+
+A imagem é publicada no GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/efssantos/glpi-mcp:latest
+```
+
+Para usar uma versão específica, substitua `latest` pela tag correspondente, por exemplo `1.0.0`.
+
+Com o arquivo `.env` preenchido, inicie o contêiner em modo stdio:
+
+```bash
+docker run --rm -i --env-file .env ghcr.io/efssantos/glpi-mcp:latest
+```
+
+Para executar em modo Streamable HTTP, configure `MCP_TRANSPORT=streamable-http` no arquivo `.env` e publique a porta:
+
+```bash
+docker run -d \\
+  --name glpi-mcp \\
+  --restart unless-stopped \\
+  --env-file .env \\
+  -e MCP_HOST=0.0.0.0 \\
+  -p 127.0.0.1:8000:8000 \\
+  ghcr.io/efssantos/glpi-mcp:latest
+```
+
+### Construir a imagem localmente
+
+Se preferir construir a imagem a partir do código-fonte:
 
 ```bash
 docker build -t glpi-mcp:local .
@@ -284,7 +314,7 @@ O GitHub Actions executa a suíte em Python 3.11 e 3.12 nos eventos configurados
 | HTTP 401 ou 403 | Confira App-Token, token/credenciais do usuário, configuração da API e permissões da conta no GLPI. |
 | Erro de certificado TLS | Instale/configure a cadeia de certificados confiável. Use `GLPI_VERIFY_TLS=false` somente em ambiente de desenvolvimento controlado. |
 | Cliente não encontra o servidor | Em stdio, valide comando, argumentos, diretório de trabalho e caminhos absolutos. Reinicie o cliente depois de editar a configuração. |
-| Contêiner HTTP inicia, mas não aceita conexões | Confirme `MCP_TRANSPORT=streamable-http`, `MCP_HOST=0.0.0.0), o mapeamento da porta e os logs do contêiner. |
+| Contêiner HTTP inicia, mas não aceita conexões | Confirme `MCP_TRANSPORT=streamable-http`, `MCP_HOST=0.0.0.0`, o mapeamento da porta e os logs do contêiner. |
 | Ferramentas não aparecem | Consulte os logs do processo MCP e confirme que o cliente suporta o transporte configurado. |
 
 ## Segurança
