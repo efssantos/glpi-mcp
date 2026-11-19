@@ -2,13 +2,61 @@ services:
   glpi-mcp:
     build: .
     image: glpi-mcp:local
-    stdin_open: true
-    tty: true
+    restart: unless-stopped
+    init: true
     expose:
       - "8000"
     environment:
       MCP_TRANSPORT: streamable-http
       MCP_HOST: 0.0.0.0
       MCP_PORT: 8000
+      MCP_PROXY_MODE: "true"
+      MCP_AUTH_ENABLED: "true"
+      MCP_PUBLIC_URL: https://${MCP_DOMAIN}/mcp
+      OIDC_ISSUER_URL: ${OIDC_ISSUER_URL}
+      OIDC_JWKS_URL: ${OIDC_JWKS_URL}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE}
     env_file:
       - .env
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - backend
+      - egress
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    init: true
+    environment:
+      MCP_DOMAIN: ${MCP_DOMAIN:?Set MCP_DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - glpi-mcp
+    networks:
+      - backend
+      - edge
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  backend:
+    internal: true
+  edge:
+    driver: bridge
+  egress:
+    driver: bridge
