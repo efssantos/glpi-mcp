@@ -10,7 +10,6 @@ Servidor MCP desenvolvido em Python que integra assistentes de IA ao GLPI por me
 - [Configuração](#configuração)
 - [Executar localmente com Python](#executar-localmente-com-python)
 - [Executar com Docker](#executar-com-docker)
-- [Implantação remota em VPS](#implantação-remota-em-vps)
 - [Conectar a um cliente MCP](#conectar-a-um-cliente-mcp)
 - [Ferramentas disponíveis](#ferramentas-disponíveis)
 - [Testes automatizados](#testes-automatizados)
@@ -197,7 +196,6 @@ docker run -d \\
   --env-file .env \\
   -e MCP_HOST=0.0.0.0 \\
   -e MCP_PROXY_MODE=true \\
-  -e MCP_AUTH_ENABLED=true \\
   -p 127.0.0.1:8000:8000 \\
   ghcr.io/efssantos/glpi-mcp:latest
 ```
@@ -438,7 +436,4 @@ O GitHub Actions executa a suíte em Python 3.11 e 3.12 nos eventos configurados
 
 Este projeto é distribuído sob a licença MIT. Consulte o arquivo [LICENSE](LICENSE) para ver os termos completos.
 
-
-## Implantação remota em VPS
-
-Para publicar o GLPI-MCP com HTTPS automático, Caddy e autenticação OAuth/OIDC, siga o [guia de implantação remota](docs/deployment.md). A configuração usa Docker Compose, mantém a porta MCP fora da interface pública e preserva o transporte local `stdio`.
+A configuração específica do conector remoto do Claude está no [guia de integração](docs/claude-integration.md).
