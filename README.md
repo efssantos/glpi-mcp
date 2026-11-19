@@ -98,7 +98,7 @@ GLPI_VERIFY_TLS=true
 
 # Para cliente local iniciado como processo:
 MCP_TRANSPORT=stdio
-MCP_HOST=127.0.0.1
+MCP_HOST=127.0.0.1\nMCP_PROXY_MODE=false
 MCP_PORT=8000
 LOG_LEVEL=INFO
 ```
@@ -195,6 +195,7 @@ docker run -d \\
   --restart unless-stopped \\
   --env-file .env \\
   -e MCP_HOST=0.0.0.0 \\
+  -e MCP_PROXY_MODE=true \\
   -p 127.0.0.1:8000:8000 \\
   ghcr.io/efssantos/glpi-mcp:latest
 ```
@@ -228,11 +229,12 @@ docker run -d \
   --env-file .env \
   -e MCP_TRANSPORT=streamable-http \
   -e MCP_HOST=0.0.0.0 \
+  -e MCP_PROXY_MODE=true \
   -p 127.0.0.1:8000:8000 \
   glpi-mcp:local
 ```
 
-O mapeamento acima disponibiliza a porta somente no loopback do host. Para acesso remoto, coloque um proxy reverso na frente do serviço, configure HTTPS e autenticação/autorização no proxy. O endpoint MCP é:
+O mapeamento acima disponibiliza a porta somente no loopback do host. O processo escuta em todas as interfaces **dentro do contêiner**, por isso `MCP_PROXY_MODE=true` só deve ser usado quando a porta estiver isolada e acessível exclusivamente pelo proxy reverso (por exemplo, por uma rede Docker privada, sem publicar a porta no host). Para acesso remoto, configure HTTPS, autenticação e autorização no proxy. Não exponha a porta do contêiner diretamente à Internet. O endpoint MCP é:
 
 ```text
 https://SEU-DOMINIO/mcp
@@ -422,8 +424,12 @@ O GitHub Actions executa a suíte em Python 3.11 e 3.12 nos eventos configurados
 - Use uma conta técnica dedicada no GLPI e aplique o princípio do menor privilégio.
 - Nunca versione `.env`, tokens, senhas ou arquivos com credenciais.
 - Mantenha a validação TLS habilitada em produção.
-- Não exponha o endpoint MCP diretamente à Internet sem uma camada de autenticação e autorização.
+- Não exponha o endpoint MCP diretamente à Internet nem publique a porta do contêiner em interfaces de rede públicas.
+- Em `streamable-http`, prefira `MCP_HOST=127.0.0.1` quando o proxy estiver no mesmo host. Se o proxy estiver em outro contêiner, use `MCP_HOST=0.0.0.0` somente com `MCP_PROXY_MODE=true`, em uma rede privada compartilhada e sem publicar a porta MCP diretamente no host.
+- Configure o proxy com HTTPS obrigatório, autenticação de cada cliente, autorização por usuário/grupo, limites de requisição e logs de auditoria.
+- Restrinja por firewall/rede o acesso à porta local do MCP para que somente o proxy possa alcançá-la. Não confie apenas em um cabeçalho de identidade enviado pelo cliente.
 - HTTPS protege o tráfego, mas, por si só, não identifica nem autoriza quem pode invocar as ferramentas.
+- O servidor MCP não implementa autenticação HTTP própria nesta versão; a implantação em rede depende dos controles do proxy. O modo `stdio` continua sendo apropriado para execução local.
 - Revogue e gere novamente qualquer token que tenha sido exposto.
 
 ## Licença

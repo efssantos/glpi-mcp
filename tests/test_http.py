@@ -35,8 +35,9 @@ class HTTPHelperTests(unittest.TestCase):
     @patch("core.http.urlopen")
     def test_translates_http_errors(self, urlopen):
         urlopen.side_effect = HTTPError("https://example.test", 401, "Unauthorized", {}, io.BytesIO(b"bad token"))
-        with self.assertRaisesRegex(IntegrationError, "HTTP 401"):
+        with self.assertRaisesRegex(IntegrationError, "HTTP 401") as context:
             request_json("https://example.test/api")
+        self.assertNotIn("bad token", str(context.exception))
 
     @patch("core.http.urlopen")
     def test_translates_connection_errors(self, urlopen):

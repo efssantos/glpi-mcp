@@ -16,7 +16,7 @@ class SettingsTests(unittest.TestCase):
             "GLPI_TIMEOUT": "15.5",
             "GLPI_VERIFY_TLS": "false",
             "MCP_TRANSPORT": "STREAMABLE-HTTP",
-            "MCP_HOST": "0.0.0.0",
+            "MCP_HOST": "127.0.0.1",
             "MCP_PORT": "9000",
         }
         with patch.dict("os.environ", env, clear=True):
@@ -27,7 +27,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.request_timeout, 15.5)
         self.assertFalse(settings.verify_tls)
         self.assertEqual(settings.mcp_transport, "streamable-http")
-        self.assertEqual(settings.mcp_host, "0.0.0.0")
+        self.assertEqual(settings.mcp_host, "127.0.0.1")
         self.assertEqual(settings.mcp_port, 9000)
 
     def test_uses_safe_defaults_when_optional_values_are_missing(self):
@@ -40,6 +40,22 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.mcp_transport, "stdio")
         self.assertEqual(settings.mcp_host, "127.0.0.1")
         self.assertEqual(settings.mcp_port, 8000)
+
+    def test_requires_proxy_mode_for_non_loopback_http_binding(self):
+        env = {"MCP_TRANSPORT": "streamable-http", "MCP_HOST": "0.0.0.0"}
+        with patch.dict("os.environ", env, clear=True):
+            with self.assertRaisesRegex(ValueError, "MCP_PROXY_MODE=true"):
+                Settings.from_env()
+        env["MCP_PROXY_MODE"] = "true"
+        with patch.dict("os.environ", env, clear=True):
+            settings = Settings.from_env()
+        self.assertTrue(settings.mcp_proxy_mode)
+
+    def test_rejects_invalid_timeout_and_port_ranges(self):
+        for env in ({"GLPI_TIMEOUT": "0"}, {"MCP_PORT": "70000"}):
+            with patch.dict("os.environ", env, clear=True):
+                with self.assertRaises(ValueError):
+                    Settings.from_env()
 
     def test_invalid_numeric_environment_values_raise_value_error(self):
         with patch.dict("os.environ", {"GLPI_TIMEOUT": "invalid"}, clear=True):

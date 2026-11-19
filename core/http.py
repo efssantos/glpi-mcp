@@ -27,15 +27,14 @@ def request_json(
         with urlopen(request, timeout=timeout, context=context) as response:
             raw = response.read()
     except HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:1000]
-        raise IntegrationError(
-            f"HTTP {exc.code} from GLPI: {detail or exc.reason}"
-        ) from exc
-    except (URLError, TimeoutError, OSError) as exc:
-        raise IntegrationError(f"Could not reach GLPI: {exc}") from exc
+        # Do not forward the response body: GLPI may include internal details or data.
+        raise IntegrationError(f"GLPI returned HTTP {exc.code}.") from None
+    except (URLError, TimeoutError, OSError):
+        # Avoid leaking hostnames, proxy details, or low-level network diagnostics.
+        raise IntegrationError("Could not reach GLPI; check connectivity and TLS configuration.") from None
     if not raw:
         return None
     try:
         return json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise IntegrationError("GLPI returned a non-JSON response") from exc
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise IntegrationError("GLPI returned a non-JSON response.") from None
