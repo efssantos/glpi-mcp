@@ -1,1 +1,0 @@
-"""Shared MCP server infrastructure."""
