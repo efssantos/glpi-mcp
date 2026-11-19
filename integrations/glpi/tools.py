@@ -4,6 +4,7 @@ from typing import Any
 
 from core.config import Settings
 from core.auth import validate_glpi_settings
+from core.authorization import require_scope
 from .client import GLPIClient
 
 
@@ -33,20 +34,17 @@ def _validate_ticket_fields(fields: dict[str, Any]) -> None:
     unknown = set(fields) - UPDATEABLE_TICKET_FIELDS
     if unknown:
         raise ValueError(f"Unsupported ticket field(s): {', '.join(sorted(unknown))}")
-
     for field_name in ("name", "content"):
         if field_name in fields:
             value = fields[field_name]
             maximum = 255 if field_name == "name" else 10000
             if not isinstance(value, str) or not value.strip() or len(value) > maximum:
                 raise ValueError(f"{field_name} must be non-empty text with at most {maximum} characters.")
-
     for field_name, (minimum, maximum) in FIELD_RANGES.items():
         if field_name in fields:
             value = fields[field_name]
             if not isinstance(value, int) or isinstance(value, bool) or not minimum <= value <= maximum:
                 raise ValueError(f"{field_name} must be an integer between {minimum} and {maximum}.")
-
     for field_name in REFERENCE_FIELDS:
         if field_name in fields:
             _positive_id(fields[field_name], field_name)
@@ -58,6 +56,7 @@ def register_glpi_tools(mcp: Any, settings: Settings) -> None:
     @mcp.tool()
     def glpi_search(itemtype: str, criteria: str = "", limit: int = 50) -> object:
         """Search GLPI items using indexed criteria fields; results are limited to 100."""
+        require_scope(settings, settings.mcp_read_scope)
         validate_glpi_settings(settings)
         if not isinstance(itemtype, str) or not itemtype.strip() or len(itemtype) > 100:
             raise ValueError("itemtype must be non-empty text with at most 100 characters.")
@@ -72,6 +71,7 @@ def register_glpi_tools(mcp: Any, settings: Settings) -> None:
     @mcp.tool()
     def glpi_get_item(itemtype: str, item_id: int) -> object:
         """Get a GLPI item by type and numeric ID."""
+        require_scope(settings, settings.mcp_read_scope)
         validate_glpi_settings(settings)
         if not isinstance(itemtype, str) or not itemtype.strip() or len(itemtype) > 100:
             raise ValueError("itemtype must be non-empty text with at most 100 characters.")
@@ -87,6 +87,7 @@ def register_glpi_tools(mcp: Any, settings: Settings) -> None:
                            itilcategories_id: int | None = None,
                            entities_id: int | None = None) -> object:
         """Create a GLPI ticket. Uses the connected GLPI account's permissions."""
+        require_scope(settings, settings.mcp_write_scope)
         validate_glpi_settings(settings)
         fields: dict[str, Any] = {"name": name, "content": content, "urgency": urgency}
         if itilcategories_id is not None:
@@ -103,6 +104,7 @@ def register_glpi_tools(mcp: Any, settings: Settings) -> None:
     @mcp.tool()
     def glpi_update_ticket(ticket_id: int, fields: dict[str, Any]) -> object:
         """Update an allowlisted set of fields on an existing GLPI ticket."""
+        require_scope(settings, settings.mcp_write_scope)
         validate_glpi_settings(settings)
         _positive_id(ticket_id, "ticket_id")
         if not isinstance(fields, dict):

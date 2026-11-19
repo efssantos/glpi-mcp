@@ -17,14 +17,7 @@ def _read_bool(name: str, default: str = "false") -> bool:
 
 def _validate_https_url(value: str, name: str) -> str:
     parsed = urlsplit(value)
-    if (
-        parsed.scheme != "https"
-        or not parsed.netloc
-        or parsed.username
-        or parsed.password
-        or parsed.query
-        or parsed.fragment
-    ):
+    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ValueError(f"{name} must be an absolute HTTPS URL without credentials, query, or fragment.")
     return value.rstrip("/")
 
@@ -59,7 +52,6 @@ class Settings:
             port = int(os.getenv("MCP_PORT", "8000"))
         except ValueError as exc:
             raise ValueError("GLPI_TIMEOUT and MCP_PORT must be valid numeric values.") from exc
-
         transport = os.getenv("MCP_TRANSPORT", "stdio").strip().lower()
         host = os.getenv("MCP_HOST", "127.0.0.1").strip()
         if not math.isfinite(timeout) or timeout <= 0:
@@ -85,22 +77,19 @@ class Settings:
         audience = os.getenv("OIDC_AUDIENCE", "").strip()
         read_scope = os.getenv("MCP_READ_SCOPE", "glpi:read").strip()
         write_scope = os.getenv("MCP_WRITE_SCOPE", "glpi:write").strip()
-
         if auth_enabled:
             if transport != "streamable-http":
                 raise ValueError("MCP_AUTH_ENABLED requires MCP_TRANSPORT=streamable-http.")
             if not all((public_url, issuer_url, jwks_url, audience, read_scope, write_scope)):
-                raise ValueError(
-                    "Remote authentication requires MCP_PUBLIC_URL, OIDC_ISSUER_URL, OIDC_JWKS_URL, OIDC_AUDIENCE, and both MCP scopes."
-                )
+                raise ValueError("Remote authentication requires MCP_PUBLIC_URL, OIDC_ISSUER_URL, OIDC_JWKS_URL, OIDC_AUDIENCE, and both MCP scopes.")
             public_url = _validate_https_url(public_url, "MCP_PUBLIC_URL")
             issuer_url = _validate_https_url(issuer_url, "OIDC_ISSUER_URL")
             jwks_url = _validate_https_url(jwks_url, "OIDC_JWKS_URL")
-
-        if transport == "streamable-http" and host not in {"127.0.0.1", "localhost", "::1"} and not proxy_mode:
-            raise ValueError(
-                "Non-loopback HTTP binding requires MCP_PROXY_MODE=true and a private network behind an authenticated reverse proxy."
-            )
+        if transport == "streamable-http" and host not in {"127.0.0.1", "localhost", "::1"}:
+            if not proxy_mode:
+                raise ValueError("Non-loopback HTTP binding requires MCP_PROXY_MODE=true and a private network behind an authenticated reverse proxy.")
+            if not auth_enabled:
+                raise ValueError("Non-loopback HTTP binding requires MCP_AUTH_ENABLED=true.")
 
         return cls(
             glpi_url=url,
