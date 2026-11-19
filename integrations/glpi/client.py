@@ -1,11 +1,15 @@
 """Client for GLPI's legacy REST API (apirest.php)."""
 
 import base64
-from urllib.parse import quote
+import re
+from urllib.parse import parse_qsl, quote, urlencode
 
 from core.config import Settings
 from core.errors import ConfigurationError, IntegrationError
 from core.http import request_json
+
+
+_SEARCH_KEY = re.compile(r"criteria\[\d+\]\[(?:field|searchtype|value|link)\]")
 
 
 class GLPIClient:
@@ -13,7 +17,7 @@ class GLPIClient:
         self.settings = settings
         if not settings.glpi_url:
             raise ConfigurationError("Set GLPI_URL to the GLPI server URL.")
-        self.base_url = f"{settings.glpi_url}/{settings.glpi_api_path.strip('/') }"
+        self.base_url = f"{settings.glpi_url}/{settings.glpi_api_path.strip('/')}"
         self._session_token: str | None = None
 
     def _headers(self) -> dict[str, str]:
@@ -57,16 +61,36 @@ class GLPIClient:
                 self._session_token = None
 
     def get(self, itemtype: str, item_id: int) -> object:
+        if not isinstance(item_id, int) or isinstance(item_id, bool) or item_id < 1:
+            raise ValueError("item_id must be a positive integer.")
         return self.request(f"{quote(itemtype, safe='')}/{item_id}")
 
     def search(self, itemtype: str, *, criteria: str = "", limit: int = 50) -> object:
-        params = f"?range=0-{max(0, min(limit, 100)-1)}"
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
+            raise ValueError("limit must be an integer between 1 and 100.")
+        if len(criteria) > 4096:
+            raise ValueError("criteria exceeds the maximum length of 4096 characters.")
+
+        query_params = [("range", f"0-{limit - 1}")]
         if criteria:
-            params += "&" + criteria.lstrip("?&")
+            try:
+                parsed = parse_qsl(criteria.lstrip("?&"), keep_blank_values=True, strict_parsing=True)
+            except ValueError as exc:
+                raise ValueError("criteria must be a valid URL-encoded query string.") from exc
+            for key, value in parsed:
+                if not _SEARCH_KEY.fullmatch(key):
+                    raise ValueError(f"Unsupported GLPI search parameter: {key}")
+                if len(value) > 1000:
+                    raise ValueError("A GLPI search criterion exceeds 1000 characters.")
+                query_params.append((key, value))
+
+        params = "?" + urlencode(query_params)
         return self.request(f"search/{quote(itemtype, safe='')}", params=params)
 
     def create(self, itemtype: str, fields: dict) -> object:
         return self.request(f"{quote(itemtype, safe='')}", method="POST", body={"input": fields})
 
     def update(self, itemtype: str, item_id: int, fields: dict) -> object:
+        if not isinstance(item_id, int) or isinstance(item_id, bool) or item_id < 1:
+            raise ValueError("item_id must be a positive integer.")
         return self.request(f"{quote(itemtype, safe='')}/{item_id}", method="PUT", body={"input": {"id": item_id, **fields}})
