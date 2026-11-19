@@ -1,5 +1,7 @@
 # Ignore these files
 Dockerfile
+.dockerignore
+requirements.txt
 compose.yml
 *.env
 /core
