@@ -19,7 +19,7 @@ def _validate_https_url(value: str, name: str) -> str:
     parsed = urlsplit(value)
     if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ValueError(f"{name} must be an absolute HTTPS URL without credentials, query, or fragment.")
-    return value.rstrip("/")
+    return value
 
 
 @dataclass(frozen=True)
