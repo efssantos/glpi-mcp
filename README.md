@@ -10,6 +10,8 @@ Servidor MCP desenvolvido em Python que integra assistentes de IA ao GLPI por me
 - [Configuração](#configuração)
 - [Executar localmente com Python](#executar-localmente-com-python)
 - [Executar com Docker](#executar-com-docker)
+- [Implantação remota em VPS](docs/deployment.md)
+- [Integração com Claude remoto](docs/claude-integration.md)
 - [Conectar a um cliente MCP](#conectar-a-um-cliente-mcp)
 - [Ferramentas disponíveis](#ferramentas-disponíveis)
 - [Testes automatizados](#testes-automatizados)
@@ -56,7 +58,7 @@ Para execução local:
 Para execução em contêiner:
 
 - Docker Engine e o comando `docker`.
-- Docker Compose não é necessário: os exemplos abaixo usam diretamente `docker build` e `docker run`.
+- Docker Compose v2 é recomendado para implantação remota com Caddy e HTTPS automático.
 
 > **Compatibilidade:** este projeto utiliza a API REST legada do GLPI (`apirest.php`). Verifique se ela está habilitada e disponível na sua instalação. A API REST v2 de versões recentes pode ter fluxo de autenticação diferente e não é o alvo desta implementação.
 
@@ -187,18 +189,7 @@ Com o arquivo `.env` preenchido, inicie o contêiner em modo stdio:
 docker run --rm -i --env-file .env ghcr.io/efssantos/glpi-mcp:latest
 ```
 
-Para executar em modo Streamable HTTP, configure `MCP_TRANSPORT=streamable-http` no arquivo `.env` e publique a porta:
-
-```bash
-docker run -d \\
-  --name glpi-mcp \\
-  --restart unless-stopped \\
-  --env-file .env \\
-  -e MCP_HOST=0.0.0.0 \\
-  -e MCP_PROXY_MODE=true \\
-  -p 127.0.0.1:8000:8000 \\
-  ghcr.io/efssantos/glpi-mcp:latest
-```
+Para implantação remota em VPS, não publique a porta MCP com `docker run`. Use o Docker Compose com Caddy, conforme o [guia de implantação](docs/deployment.md).
 
 ### Construir a imagem localmente
 
@@ -421,6 +412,8 @@ O GitHub Actions executa a suíte em Python 3.11 e 3.12 nos eventos configurados
 
 ## Segurança
 
+Consulte também os guias de [implantação em VPS](docs/deployment.md) e [integração com Claude remoto](docs/claude-integration.md).
+
 - Use uma conta técnica dedicada no GLPI e aplique o princípio do menor privilégio.
 - Nunca versione `.env`, tokens, senhas ou arquivos com credenciais.
 - Mantenha a validação TLS habilitada em produção.
@@ -429,9 +422,11 @@ O GitHub Actions executa a suíte em Python 3.11 e 3.12 nos eventos configurados
 - Configure o proxy com HTTPS obrigatório, autenticação de cada cliente, autorização por usuário/grupo, limites de requisição e logs de auditoria.
 - Restrinja por firewall/rede o acesso à porta local do MCP para que somente o proxy possa alcançá-la. Não confie apenas em um cabeçalho de identidade enviado pelo cliente.
 - HTTPS protege o tráfego, mas, por si só, não identifica nem autoriza quem pode invocar as ferramentas.
-- O servidor MCP não implementa autenticação HTTP própria nesta versão; a implantação em rede depende dos controles do proxy. O modo `stdio` continua sendo apropriado para execução local.
+- Em `streamable-http`, habilite `MCP_AUTH_ENABLED=true` e configure um provedor OIDC confiável; o servidor valida assinatura, emissor, audiência, expiração e escopos dos access tokens. O modo `stdio` continua disponível sem autenticação HTTP.
 - Revogue e gere novamente qualquer token que tenha sido exposto.
 
 ## Licença
 
 Este projeto é distribuído sob a licença MIT. Consulte o arquivo [LICENSE](LICENSE) para ver os termos completos.
+
+A configuração específica do conector remoto do Claude está no [guia de integração](docs/claude-integration.md).
