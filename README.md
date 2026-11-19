@@ -100,7 +100,8 @@ GLPI_VERIFY_TLS=true
 
 # Para cliente local iniciado como processo:
 MCP_TRANSPORT=stdio
-MCP_HOST=127.0.0.1\nMCP_PROXY_MODE=false
+MCP_HOST=127.0.0.1
+MCP_PROXY_MODE=false
 MCP_PORT=8000
 LOG_LEVEL=INFO
 ```
@@ -239,6 +240,100 @@ docker stop glpi-mcp
 ```
 
 Se alterar o código ou as dependências, reconstrua a imagem e recrie o contêiner.
+
+## Instalar em uma VPS com HTTPS
+
+Para disponibilizar o GLPI-MCP na Internet com HTTPS, use o Docker Compose incluído no projeto. Nessa arquitetura, o **Caddy recebe as conexões públicas, obtém e renova o certificado TLS automaticamente**, e encaminha as requisições para o GLPI-MCP por uma rede Docker privada.
+
+> **Importante:** HTTPS não é fornecido pela imagem isolada `glpi-mcp`. Ele é configurado pelo serviço Caddy, que deve ser executado junto com o MCP usando o Compose.
+
+### 1. Pré-requisitos
+
+- Uma VPS Linux com Docker Engine e Docker Compose v2 instalados.
+- Um domínio ou subdomínio, por exemplo `mcp.suaempresa.com`.
+- Um registro DNS tipo `A` apontando esse domínio para o IP público da VPS (e registro `AAAA` correto, caso use IPv6).
+- Portas **TCP 80 e 443** liberadas no firewall da VPS e no firewall do provedor. A porta UDP 443 é opcional para HTTP/3.
+- Uma instância GLPI acessível pela VPS.
+- Um provedor de identidade OIDC configurado para emitir access tokens JWT.
+
+### 2. Preparar o domínio e baixar o projeto
+
+Configure o DNS antes de iniciar o Caddy. Depois, conecte-se à VPS e execute:
+
+```bash
+git clone https://github.com/efssantos/glpi-mcp.git
+cd glpi-mcp
+cp .env.example .env
+```
+
+### 3. Configurar as variáveis de ambiente
+
+Edite o arquivo `.env`:
+
+```dotenv
+GLPI_URL=https://glpi.suaempresa.com
+GLPI_APP_TOKEN=SEU_APP_TOKEN
+GLPI_USER_TOKEN=SEU_USER_TOKEN
+
+MCP_DOMAIN=mcp.suaempresa.com
+MCP_PUBLIC_URL=https://mcp.suaempresa.com/mcp
+
+OIDC_ISSUER_URL=https://seu-idp.suaempresa.com/realms/glpi
+OIDC_JWKS_URL=https://seu-idp.suaempresa.com/realms/glpi/protocol/openid-connect/certs
+OIDC_AUDIENCE=glpi-mcp
+MCP_READ_SCOPE=glpi:read
+MCP_WRITE_SCOPE=glpi:write
+```
+
+Ajuste os endereços conforme seu ambiente e use os valores exatos publicados pelo seu provedor OIDC:
+
+- `MCP_DOMAIN`: domínio público que será atendido pelo Caddy.
+- `MCP_PUBLIC_URL`: endereço público completo do endpoint MCP.
+- `OIDC_ISSUER_URL`: emissor (`issuer`) dos tokens.
+- `OIDC_JWKS_URL`: endereço HTTPS das chaves públicas usadas para validar a assinatura dos tokens.
+- `OIDC_AUDIENCE`: audiência que o provedor deve incluir nos access tokens destinados ao GLPI-MCP.
+
+O provedor OIDC deve emitir **access tokens JWT assinados** com `iss`, `aud`, `exp` e escopos. Conceda `glpi:read` para pesquisa e consulta; para criar ou atualizar chamados, o cliente também precisará de `glpi:write`. O GLPI-MCP valida os tokens, mas **não hospeda uma tela de login nem emite tokens**: o login e a emissão ficam a cargo do provedor OIDC externo. Não use ID token no lugar de access token.
+
+Mantenha o arquivo `.env` protegido e nunca o envie ao GitHub.
+
+### 4. Iniciar o GLPI-MCP com HTTPS
+
+Na pasta do projeto, execute:
+
+```bash
+docker compose up -d --build
+docker compose ps
+```
+
+Acompanhe a inicialização:
+
+```bash
+docker compose logs -f caddy glpi-mcp
+```
+
+Quando o DNS estiver propagado e as portas necessárias estiverem acessíveis, o Caddy solicitará automaticamente um certificado TLS válido e cuidará da renovação. O endpoint ficará disponível em:
+
+```text
+https://mcp.suaempresa.com/mcp
+```
+
+### 5. Validar o acesso
+
+- Acesse `https://mcp.suaempresa.com` e confirme que o certificado HTTPS é válido.
+- Configure seu cliente MCP para usar o endpoint `https://mcp.suaempresa.com/mcp` e o fluxo OAuth/OIDC suportado pelo cliente.
+- Uma chamada sem access token válido deve ser rejeitada; use um cliente autenticado para testar as ferramentas.
+- Verifique os logs com `docker compose logs --tail 100 glpi-mcp caddy`.
+
+### 6. Regras de segurança da VPS
+
+- Libere publicamente somente as portas TCP 80 e 443 (e UDP 443 se desejar HTTP/3).
+- **Não abra a porta 8000** no firewall: o serviço MCP não publica essa porta no host e só recebe tráfego do Caddy pela rede privada do Compose.
+- Não execute o serviço remoto sem autenticação OIDC habilitada.
+- Use uma conta técnica GLPI com permissões mínimas e proteja/rotacione os tokens.
+- Faça backup dos volumes `caddy_data` e `caddy_config`, que armazenam dados necessários ao funcionamento do Caddy.
+
+Para detalhes de arquitetura, provedor de identidade e operação, consulte o [guia de implantação remota](docs/deployment.md) e o [guia de integração com Claude remoto](docs/claude-integration.md).
 
 ## Conectar a um cliente MCP
 
