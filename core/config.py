@@ -17,6 +17,7 @@ class Settings:
     mcp_transport: str = "stdio"
     mcp_host: str = "127.0.0.1"
     mcp_port: int = 8000
+    mcp_proxy_mode: bool = False
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -37,9 +38,10 @@ class Settings:
             raise ValueError("MCP_TRANSPORT must be 'stdio' or 'streamable-http'.")
         if not host:
             raise ValueError("MCP_HOST must not be empty.")
-        if transport == "streamable-http" and host not in {"127.0.0.1", "localhost", "::1"}:
+        proxy_mode = os.getenv("MCP_PROXY_MODE", "false").strip().lower() in {"1", "true", "yes"}
+        if transport == "streamable-http" and host not in {"127.0.0.1", "localhost", "::1"} and not proxy_mode:
             raise ValueError(
-                "For streamable-http, bind to loopback and publish through an authenticated reverse proxy."
+                "Non-loopback HTTP binding requires MCP_PROXY_MODE=true and a private network behind an authenticated reverse proxy."
             )
 
         return cls(
@@ -54,4 +56,5 @@ class Settings:
             mcp_transport=transport,
             mcp_host=host,
             mcp_port=port,
+            mcp_proxy_mode=proxy_mode,
         )
