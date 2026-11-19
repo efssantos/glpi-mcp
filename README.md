@@ -61,3 +61,17 @@ REST e conceda à conta apenas as permissões necessárias. A API REST v2 de
 instalações GLPI recentes usa OAuth2; esta implementação mira a API legada
 `apirest.php`, que continua disponível em muitas instalações. Consulte a
 documentação da API da sua versão antes de definir `GLPI_API_PATH`.
+
+## Testes automatizados
+
+A suíte usa `unittest`, incluído na biblioteca padrão do Python, e mocks para
+isolar as chamadas HTTP. Não é necessário ter uma instância GLPI ou credenciais
+para executar os testes.
+
+```bash
+python -m pip install -r requirements.txt
+python -m unittest discover -s tests -v
+```
+
+O GitHub Actions executa a suíte em Python 3.11 e 3.12 a cada push para `main`
+ou branches `test/**`, e em Pull Requests direcionados à `main`.

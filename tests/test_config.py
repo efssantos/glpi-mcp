@@ -1,0 +1,51 @@
+"""Tests for environment-based settings."""
+
+import unittest
+from unittest.mock import patch
+
+from core.config import Settings
+
+
+class SettingsTests(unittest.TestCase):
+    def test_reads_environment_and_normalizes_values(self):
+        env = {
+            "GLPI_URL": " https://glpi.example.test/ ",
+            "GLPI_API_PATH": "/custom/api/",
+            "GLPI_APP_TOKEN": "app",
+            "GLPI_USER_TOKEN": "user",
+            "GLPI_TIMEOUT": "15.5",
+            "GLPI_VERIFY_TLS": "false",
+            "MCP_TRANSPORT": "STREAMABLE-HTTP",
+            "MCP_HOST": "0.0.0.0",
+            "MCP_PORT": "9000",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            settings = Settings.from_env()
+
+        self.assertEqual(settings.glpi_url, "https://glpi.example.test")
+        self.assertEqual(settings.glpi_api_path, "/custom/api")
+        self.assertEqual(settings.request_timeout, 15.5)
+        self.assertFalse(settings.verify_tls)
+        self.assertEqual(settings.mcp_transport, "streamable-http")
+        self.assertEqual(settings.mcp_host, "0.0.0.0")
+        self.assertEqual(settings.mcp_port, 9000)
+
+    def test_uses_safe_defaults_when_optional_values_are_missing(self):
+        with patch.dict("os.environ", {}, clear=True):
+            settings = Settings.from_env()
+
+        self.assertEqual(settings.glpi_url, "")
+        self.assertEqual(settings.request_timeout, 30.0)
+        self.assertTrue(settings.verify_tls)
+        self.assertEqual(settings.mcp_transport, "stdio")
+        self.assertEqual(settings.mcp_host, "127.0.0.1")
+        self.assertEqual(settings.mcp_port, 8000)
+
+    def test_invalid_numeric_environment_values_raise_value_error(self):
+        with patch.dict("os.environ", {"GLPI_TIMEOUT": "invalid"}, clear=True):
+            with self.assertRaises(ValueError):
+                Settings.from_env()
+
+
+if __name__ == "__main__":
+    unittest.main()
