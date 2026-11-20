@@ -1,156 +1,183 @@
 # GLPI MCP Server
 
-Servidor MCP desenvolvido em Python que integra assistentes de IA ao GLPI por meio da API REST legada (`apirest.php`). Com ele, um cliente compatível com o Model Context Protocol (MCP) pode pesquisar registros, consultar itens e gerenciar chamados, respeitando as permissões da conta configurada no GLPI.
+Servidor [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) desenvolvido em Python para conectar clientes de IA à API REST legada do GLPI (`apirest.php`). Permite pesquisar registros, consultar itens e criar ou atualizar chamados usando as permissões da conta de integração configurada no GLPI.
+
+O projeto oferece três formas de execução:
+
+- **Local (`stdio`)**: o cliente MCP inicia o processo na própria máquina.
+- **HTTP local**: o servidor fica disponível em `http://127.0.0.1:8000/mcp`, para desenvolvimento e clientes na mesma máquina.
+- **HTTPS remoto**: implantação em VPS com Docker Compose, Caddy e autenticação OIDC.
+
+> O projeto integra-se à API REST legada do GLPI. A API REST v2 não é o alvo desta implementação.
 
 ## Índice
 
-- [Como funciona](#como-funciona)
-- [Pré-requisitos](#pré-requisitos)
-- [Preparar o GLPI](#preparar-o-glpi)
+- [Arquitetura e funcionamento](#arquitetura-e-funcionamento)
+- [Pré-requisitos e preparação do GLPI](#pré-requisitos-e-preparação-do-glpi)
 - [Configuração](#configuração)
-- [Executar localmente com Python](#executar-localmente-com-python)
-- [Executar com Docker](#executar-com-docker)
-- [Implantação remota em VPS](#implantação-remota-em-vps-com-https)
-- [Integração com Claude remoto](#conectar-o-claude-ao-servidor-remoto)
-- [Conectar a um cliente MCP](#conectar-a-um-cliente-mcp)
+- [Instalação local passo a passo](#instalação-local-passo-a-passo)
+- [Executar em HTTP local](#executar-em-http-local)
+- [Implantar em HTTPS na VPS](#implantar-em-https-na-vps)
+- [Conectar clientes MCP](#conectar-clientes-mcp)
 - [Ferramentas disponíveis](#ferramentas-disponíveis)
-- [Testes automatizados](#testes-automatizados)
-- [Solução de problemas](#solução-de-problemas)
+- [Desenvolvimento e contribuição](#desenvolvimento-e-contribuição)
 - [Segurança](#segurança)
+- [Solução de problemas](#solução-de-problemas)
+- [Licença](#licença)
 
-## Como funciona
+## Arquitetura e funcionamento
 
-O GLPI MCP Server funciona como uma ponte entre o cliente MCP (por exemplo, Claude Desktop) e a API REST do GLPI:
+O GLPI-MCP atua como uma ponte: recebe chamadas de ferramentas pelo protocolo MCP, executa a operação correspondente na API do GLPI e devolve o resultado ao cliente.
 
 ```text
-Assistente/cliente MCP  <-->  GLPI MCP Server  <-->  API REST do GLPI
+Cliente MCP (Claude, etc.)
+        |
+        | stdio ou Streamable HTTP
+        v
+    GLPI-MCP
+        |
+        | API REST legada
+        v
+       GLPI
 ```
 
-O servidor oferece dois modos de transporte:
+No modo remoto, a arquitetura recomendada adiciona um proxy HTTPS e um provedor de identidade externo:
 
-- **stdio**: recomendado quando o cliente MCP inicia o servidor como um processo local.
-- **Streamable HTTP**: recomendado para execução como serviço, acessível por um cliente remoto ou por um proxy reverso.
+```text
+Cliente MCP
+    |
+ HTTPS :443
+    |
+  Caddy
+    |
+ rede Docker privada
+    |
+ GLPI-MCP ---- OIDC/JWKS
+    |
+ GLPI API
+```
 
-### Qual modo devo escolher?
+### Estrutura do projeto
 
-A escolha depende de onde o servidor será executado e de quem precisa acessá-lo:
+```text
+.
+├── core/
+│   ├── auth.py             # Validação da configuração de acesso ao GLPI
+│   ├── authorization.py    # Autorização por escopos OAuth
+│   ├── config.py           # Leitura e validação das variáveis de ambiente
+│   ├── errors.py           # Exceções da aplicação e integração
+│   ├── http.py             # Camada HTTP compartilhada
+│   ├── oauth.py            # Validação de access tokens OIDC/JWT
+│   └── registry.py         # Criação e configuração do servidor FastMCP
+├── integrations/
+│   └── glpi/
+│       ├── client.py       # Cliente da API REST do GLPI
+│       └── tools.py        # Ferramentas MCP expostas pelo GLPI
+├── tests/                  # Testes automatizados com unittest e mocks
+├── server.py               # Ponto de entrada da aplicação
+├── compose.yaml            # Implantação remota com Caddy e HTTPS
+├── Caddyfile               # Proxy reverso e TLS automático
+├── Dockerfile
+├── requirements.txt
+└── .env.example
+```
 
-| Cenário | Transporte recomendado | Motivo |
-|---|---|---|
-| Uso individual no computador, por exemplo com Claude Desktop | **stdio (local)** | O próprio cliente inicia o processo. Não precisa abrir porta nem publicar um serviço de rede. |
-| Desenvolvimento e testes na máquina do desenvolvedor | **stdio (local)** | Configuração simples e comunicação direta entre o cliente e o processo. |
-| GLPI MCP hospedado em uma VM ou servidor | **Streamable HTTP** | O MCP fica em execução como serviço e pode ser acessado por clientes remotos. |
-| Vários usuários ou clientes precisam acessar uma instalação central | **Streamable HTTP** | Centraliza a execução e a manutenção do servidor. Cada cliente precisa ser autenticado e autorizado conforme a arquitetura adotada. |
-| Ambiente com proxy reverso e domínio HTTPS | **Streamable HTTP** | Permite publicar o endpoint por meio de um proxy, com TLS e controles de acesso. |
-| Ambiente sem necessidade de acesso remoto | **stdio (local)** | Evita manter uma porta HTTP aberta. |
+### Fluxo de uma chamada
 
-**Regra prática:** use stdio quando o assistente e o processo MCP estiverem na mesma máquina e o cliente puder iniciar o processo. Use Streamable HTTP quando o MCP precisar ficar hospedado e ser acessado pela rede. Os dois modos oferecem as mesmas ferramentas; o que muda é a forma de comunicação.
+1. O cliente MCP invoca uma ferramenta registrada pelo servidor.
+2. A ferramenta valida os parâmetros e, no modo remoto, verifica os escopos necessários.
+3. O cliente GLPI inicia uma sessão na API usando o App-Token e o token ou as credenciais da conta técnica.
+4. A operação é executada na API REST do GLPI.
+5. A sessão da API é encerrada e o resultado é devolvido ao cliente MCP.
 
-## Pré-requisitos
+## Pré-requisitos e preparação do GLPI
 
-Para execução local:
+Você precisará de:
 
-- Python 3.11 ou superior.
+- Python 3.11 ou superior para execução e desenvolvimento local.
+- Docker Engine e Docker Compose v2 para implantação em contêiner/VPS.
 - Acesso de rede à instância GLPI.
-- API REST legada habilitada no GLPI.
-- Token de aplicação e credenciais/token de usuário com as permissões necessárias.
+- API REST legada habilitada na instalação GLPI.
+- App-Token, quando exigido pela configuração da API.
+- User Token ou usuário e senha de uma conta técnica.
 
-Para execução em contêiner:
+No GLPI:
 
-- Docker Engine e o comando `docker`.
-- Docker Compose v2 é recomendado para implantação remota com Caddy e HTTPS automático.
+1. Habilite a API REST legada nas configurações da sua instalação.
+2. Gere o App-Token, se a configuração exigir esse token.
+3. Gere um User Token para uma conta de integração ou prepare usuário e senha dedicados.
+4. Conceda à conta apenas as permissões necessárias para consultar e gerenciar chamados.
 
-> **Compatibilidade:** este projeto utiliza a API REST legada do GLPI (`apirest.php`). Verifique se ela está habilitada e disponível na sua instalação. A API REST v2 de versões recentes pode ter fluxo de autenticação diferente e não é o alvo desta implementação.
-
-## Preparar o GLPI
-
-1. Entre no GLPI com uma conta administradora.
-2. Habilite e configure a API REST legada nas configurações de API da sua instalação.
-3. Gere um **App-Token** (token da aplicação).
-4. Gere um **User Token** para a conta de integração ou prepare um usuário e senha dedicados.
-5. Conceda à conta somente as permissões necessárias para as operações que pretende executar.
-
-Os nomes dos menus podem variar conforme a versão e o idioma do GLPI. Consulte a documentação correspondente à sua versão para habilitar a API e gerar os tokens.
-
-Você precisará da URL base do GLPI, por exemplo `https://glpi.suaempresa.com`. Não inclua `/apirest.php` no valor de `GLPI_URL`; o caminho da API é configurado separadamente.
+Use a URL base do GLPI, por exemplo `https://glpi.exemplo.com`. Não acrescente `/apirest.php` em `GLPI_URL`; o caminho é definido por `GLPI_API_PATH`.
 
 ## Configuração
 
-Clone o repositório e entre na pasta:
+Clone o repositório:
 
 ```bash
 git clone https://github.com/efssantos/glpi-mcp.git
 cd glpi-mcp
 ```
 
-Crie um arquivo `.env` na raiz do projeto usando `.env.example` como referência. Exemplo:
+Crie o arquivo de ambiente a partir do exemplo:
 
-```dotenv
-GLPI_URL=https://glpi.suaempresa.com
-GLPI_API_PATH=/apirest.php
-GLPI_APP_TOKEN=COLOQUE_SEU_APP_TOKEN
-
-# Use GLPI_USER_TOKEN ou, alternativamente, GLPI_USERNAME + GLPI_PASSWORD.
-GLPI_USER_TOKEN=COLOQUE_SEU_USER_TOKEN
-# GLPI_USERNAME=usuario-integracao
-# GLPI_PASSWORD=sua-senha
-
-GLPI_TIMEOUT=30
-GLPI_VERIFY_TLS=true
-
-# Para cliente local iniciado como processo:
-MCP_TRANSPORT=stdio
-MCP_HOST=127.0.0.1
-MCP_PROXY_MODE=false
-MCP_PORT=8000
-LOG_LEVEL=INFO
+```bash
+cp .env.example .env
 ```
 
-Ajuste os valores de acordo com seu ambiente:
+Preencha os dados de acesso ao GLPI. Exemplo mínimo:
 
-| Variável | Obrigatória | Descrição |
-|---|---:|---|
-| `GLPI_URL` | Sim | URL base da instalação GLPI, sem o caminho da API. |
-| `GLPI_API_PATH` | Não | Caminho da API. Padrão: `/apirest.php`. |
-| `GLPI_APP_TOKEN` | Conforme GLPI | Token da aplicação, quando exigido pela configuração da API. |
-| `GLPI_USER_TOKEN` | Uma forma de autenticação | Token do usuário. Alternativamente, use usuário e senha. |
-| `GLPI_USERNAME` | Uma forma de autenticação | Usuário da conta de integração. |
-| `GLPI_PASSWORD` | Uma forma de autenticação | Senha da conta de integração. |
-| `GLPI_TIMEOUT` | Não | Tempo limite das requisições em segundos. Padrão: `30`. |
-| `GLPI_VERIFY_TLS` | Não | Valida o certificado TLS. Padrão: `true`. |
-| `MCP_TRANSPORT` | Não | `stdio` ou `streamable-http`. Padrão: `stdio`. |
-| `MCP_HOST` | Não | Interface de escuta HTTP. Padrão: `127.0.0.1`. |
-| `MCP_PORT` | Não | Porta HTTP. Padrão: `8000`. |
+```dotenv
+GLPI_URL=https://glpi.exemplo.com
+GLPI_API_PATH=/apirest.php
+GLPI_APP_TOKEN=seu-app-token
+GLPI_USER_TOKEN=seu-user-token
+GLPI_TIMEOUT=30
+GLPI_VERIFY_TLS=true
+```
 
-Não compartilhe o arquivo `.env`, tokens ou senhas. O arquivo já deve permanecer fora do Git por meio do `.gitignore`.
+Você pode usar `GLPI_USER_TOKEN` ou, alternativamente, definir `GLPI_USERNAME` e `GLPI_PASSWORD`. Não configure as duas formas sem necessidade.
 
-## Executar localmente com Python
+### Variáveis principais
 
-### Windows (PowerShell)
+| Variável | Finalidade | Padrão |
+|---|---|---|
+| `GLPI_URL` | URL base da instância GLPI | Obrigatória |
+| `GLPI_API_PATH` | Caminho da API REST | `/apirest.php` |
+| `GLPI_APP_TOKEN` | Token da aplicação, se exigido pelo GLPI | — |
+| `GLPI_USER_TOKEN` | Token do usuário de integração | — |
+| `GLPI_USERNAME` / `GLPI_PASSWORD` | Autenticação alternativa à User Token | — |
+| `GLPI_TIMEOUT` | Timeout das requisições, em segundos | `30` |
+| `GLPI_VERIFY_TLS` | Validar certificado TLS do GLPI | `true` |
+| `MCP_TRANSPORT` | Transporte: `stdio` ou `streamable-http` | `stdio` |
+| `MCP_HOST` | Interface de escuta HTTP | `127.0.0.1` |
+| `MCP_PORT` | Porta HTTP | `8000` |
+| `MCP_PROXY_MODE` | Indica execução atrás de proxy privado | `false` |
+| `MCP_AUTH_ENABLED` | Habilita autenticação OIDC no HTTP | `false` |
+| `MCP_PUBLIC_URL` | URL pública do recurso MCP | — |
+| `OIDC_ISSUER_URL` | Emissor OIDC confiável | — |
+| `OIDC_JWKS_URL` | Endpoint JWKS para validar assinaturas | — |
+| `OIDC_AUDIENCE` | Audiência esperada no access token | — |
+| `MCP_READ_SCOPE` / `MCP_WRITE_SCOPE` | Escopos de leitura e escrita | `glpi:read` / `glpi:write` |
 
-Crie e ative um ambiente virtual:
+O arquivo `.env` contém segredos e não deve ser enviado ao Git. O `.gitignore` já exclui esse arquivo; mantenha apenas o `.env.example` versionado.
+
+## Instalação local passo a passo
+
+Esta é a opção indicada para quem quer usar o GLPI-MCP no próprio computador com um cliente que inicia processos MCP por `stdio`.
+
+### 1. Criar o ambiente Python
+
+**Windows (PowerShell):**
 
 ```powershell
 py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
+..\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Se o PowerShell bloquear a ativação do ambiente virtual, consulte as políticas de execução da sua organização ou execute os comandos usando o Python do ambiente virtual diretamente.
-
-Configure as variáveis de ambiente a partir do arquivo `.env` ou defina-as na sessão do PowerShell. Para definir manualmente:
-
-```powershell
-$env:GLPI_URL = "https://glpi.suaempresa.com"
-$env:GLPI_API_PATH = "/apirest.php"
-$env:GLPI_APP_TOKEN = "COLOQUE_SEU_APP_TOKEN"
-$env:GLPI_USER_TOKEN = "COLOQUE_SEU_USER_TOKEN"
-$env:MCP_TRANSPORT = "stdio"
-python -m server
-```
-
-### Linux e macOS
+**Linux ou macOS:**
 
 ```bash
 python3 -m venv .venv
@@ -159,106 +186,53 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Defina as variáveis de ambiente (ou carregue-as com uma ferramenta local apropriada) e inicie:
+### 2. Configurar as credenciais
+
+Defina as variáveis de ambiente na sessão do terminal. Exemplo em PowerShell:
+
+```powershell
+$env:GLPI_URL = "https://glpi.exemplo.com"
+$env:GLPI_APP_TOKEN = "seu-app-token"
+$env:GLPI_USER_TOKEN = "seu-user-token"
+$env:MCP_TRANSPORT = "stdio"
+```
+
+Exemplo em Linux/macOS:
 
 ```bash
-export GLPI_URL="https://glpi.suaempresa.com"
-export GLPI_API_PATH="/apirest.php"
-export GLPI_APP_TOKEN="COLOQUE_SEU_APP_TOKEN"
-export GLPI_USER_TOKEN="COLOQUE_SEU_USER_TOKEN"
+export GLPI_URL="https://glpi.exemplo.com"
+export GLPI_APP_TOKEN="seu-app-token"
+export GLPI_USER_TOKEN="seu-user-token"
 export MCP_TRANSPORT="stdio"
+```
+
+O programa lê variáveis de ambiente do processo. Ele não carrega automaticamente o arquivo `.env`; para uso pelo cliente MCP, informe as variáveis na configuração do cliente ou utilize um script de inicialização que as carregue.
+
+### 3. Testar a inicialização
+
+Com o ambiente virtual ativo e as variáveis configuradas:
+
+```bash
 python -m server
 ```
 
-Quando o servidor estiver no modo `stdio`, ele é iniciado pelo cliente MCP. Não é necessário abrir uma porta de rede nem manter um terminal separado executando o processo.
+No modo `stdio`, o processo aguarda mensagens do cliente MCP. Por isso, a forma recomendada de uso é iniciá-lo pelo cliente, e não manter um terminal separado esperando uma interface visual.
 
-## Executar com Docker
+### 4. Conectar ao Claude Desktop
 
-### Usar imagem publicada (GHCR)
-
-A imagem é publicada no GitHub Container Registry:
-
-```bash
-docker pull ghcr.io/efssantos/glpi-mcp:latest
-```
-
-Para usar uma versão específica, substitua `latest` pela tag correspondente, por exemplo `1.0.0`.
-
-Com o arquivo `.env` preenchido, inicie o contêiner em modo stdio:
-
-```bash
-docker run --rm -i --env-file .env ghcr.io/efssantos/glpi-mcp:latest
-```
-
-Para implantação remota em VPS, não publique a porta MCP com `docker run`. Use o Docker Compose com Caddy, conforme a seção [Implantação remota em VPS](#implantação-remota-em-vps-com-https).
-
-### Construir a imagem localmente
-
-Se preferir construir a imagem a partir do código-fonte:
-
-```bash
-docker build -t glpi-mcp:local .
-```
-
-### Modo stdio (cliente local)
-
-O cliente MCP deve iniciar o contêiner e manter a entrada padrão aberta:
-
-```bash
-docker run --rm -i --env-file .env glpi-mcp:local
-```
-
-Esse comando é apropriado para ser usado como processo iniciado pelo cliente MCP. Não acrescente `-t` nessa configuração.
-
-### Modo Streamable HTTP (serviço)
-
-Para executar o servidor como serviço HTTP, configure `MCP_TRANSPORT=streamable-http` e faça o processo escutar em `0.0.0.0` dentro do contêiner. Exemplo:
-
-```bash
-docker run -d \
-  --name glpi-mcp \
-  --restart unless-stopped \
-  --env-file .env \
-  -e MCP_TRANSPORT=streamable-http \
-  -e MCP_HOST=0.0.0.0 \
-  -e MCP_PROXY_MODE=true \
-  -p 127.0.0.1:8000:8000 \
-  glpi-mcp:local
-```
-
-O mapeamento acima disponibiliza a porta somente no loopback do host. O processo escuta em todas as interfaces **dentro do contêiner**, por isso `MCP_PROXY_MODE=true` só deve ser usado quando a porta estiver isolada e acessível exclusivamente pelo proxy reverso (por exemplo, por uma rede Docker privada, sem publicar a porta no host). Para acesso remoto, configure HTTPS, autenticação e autorização no proxy. Não exponha a porta do contêiner diretamente à Internet. O endpoint MCP é:
-
-```text
-https://SEU-DOMINIO/mcp
-```
-
-Consulte os logs e pare o contêiner com:
-
-```bash
-docker logs -f glpi-mcp
-docker stop glpi-mcp
-```
-
-Se alterar o código ou as dependências, reconstrua a imagem e recrie o contêiner.
-
-## Conectar a um cliente MCP
-
-### Claude Desktop — execução local com Python
-
-No arquivo de configuração do Claude Desktop, adicione uma entrada em `mcpServers`. Ajuste o caminho absoluto do repositório e o caminho do arquivo `.env`:
+No arquivo de configuração do Claude Desktop, inclua o servidor em `mcpServers`. Ajuste os caminhos e as credenciais:
 
 ```json
 {
   "mcpServers": {
     "glpi": {
-      "command": "C:\\CAMINHO\\PARA\\glpi-mcp\\.venv\\Scripts\\python.exe",
+      "command": "C:\\caminho\\glpi-mcp\\.venv\\Scripts\\python.exe",
       "args": ["-m", "server"],
-      "cwd": "C:\\CAMINHO\\PARA\\glpi-mcp",
+      "cwd": "C:\\caminho\\glpi-mcp",
       "env": {
-        "GLPI_URL": "https://glpi.suaempresa.com",
-        "GLPI_API_PATH": "/apirest.php",
-        "GLPI_APP_TOKEN": "SEU_APP_TOKEN",
-        "GLPI_USER_TOKEN": "SEU_USER_TOKEN",
+        "GLPI_URL": "https://glpi.exemplo.com",
+        "GLPI_APP_TOKEN": "seu-app-token",
+        "GLPI_USER_TOKEN": "seu-user-token",
         "MCP_TRANSPORT": "stdio"
       }
     }
@@ -266,211 +240,86 @@ No arquivo de configuração do Claude Desktop, adicione uma entrada em `mcpServ
 }
 ```
 
-Substitua os caminhos e credenciais pelos valores do seu ambiente. Alternativamente, use um pequeno script de inicialização que carregue o arquivo `.env` e inicie `python -m server`; não presuma que o cliente MCP carregará automaticamente o arquivo `.env`.
+No Linux/macOS, substitua `command` e `cwd` pelos caminhos correspondentes. Reinicie o Claude Desktop e confira se as ferramentas do GLPI aparecem.
 
-### Claude Desktop — execução local com Docker
+## Executar em HTTP local
 
-Se a imagem já foi construída e o arquivo `.env` está em um caminho conhecido, a configuração pode iniciar o contêiner:
+Use HTTP quando quiser executar o servidor como processo independente e conectar um cliente MCP por URL. Esta configuração é apropriada para desenvolvimento ou acesso na própria máquina; não publique esse endpoint diretamente na Internet.
 
-```json
-{
-  "mcpServers": {
-    "glpi": {
-      "command": "docker",
-      "args": [
-        "run", "--rm", "-i",
-        "--env-file", "C:\\CAMINHO\\PARA\\glpi-mcp\\.env",
-        "glpi-mcp:local"
-      ]
-    }
-  }
-}
+### 1. Configurar o transporte
+
+Mantenha as variáveis de acesso ao GLPI configuradas e defina:
+
+**PowerShell:**
+
+```powershell
+$env:MCP_TRANSPORT = "streamable-http"
+$env:MCP_HOST = "127.0.0.1"
+$env:MCP_PORT = "8000"
+$env:MCP_PROXY_MODE = "false"
+$env:MCP_AUTH_ENABLED = "false"
 ```
 
-### Cliente remoto via Streamable HTTP
-
-Quando o servidor estiver publicado com HTTPS e protegido por autenticação, configure o cliente MCP para usar o endpoint remoto `https://SEU-DOMINIO/mcp`. A forma exata de cadastrar um servidor HTTP varia conforme o cliente. Não use HTTP sem TLS em redes não confiáveis.
-
-Após conectar, confirme no cliente se as ferramentas do GLPI foram carregadas. Reinicie o cliente após alterar sua configuração.
-
-## Validar a instalação Streamable HTTP
-
-Depois de iniciar o contêiner, faça os testes abaixo na própria máquina em que o serviço está hospedado. Os exemplos consideram a porta local `127.0.0.1:8000` e o endpoint `/mcp`.
-
-### 1. Verificar se o contêiner está em execução
+**Linux/macOS:**
 
 ```bash
-docker ps --filter name=glpi-mcp
-docker logs --tail 50 glpi-mcp
+export MCP_TRANSPORT="streamable-http"
+export MCP_HOST="127.0.0.1"
+export MCP_PORT="8000"
+export MCP_PROXY_MODE="false"
+export MCP_AUTH_ENABLED="false"
 ```
 
-Confirme que o contêiner está ativo e que os logs não mostram erros de inicialização.
-
-### 2. Inicializar uma sessão MCP
-
-Envie uma requisição JSON-RPC de inicialização:
+### 2. Iniciar o servidor
 
 ```bash
-curl -i \
-  -X POST http://127.0.0.1:8000/mcp \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -d '{
-    "jsonrpc": "2.0",
-    "id": 1,
-    "method": "initialize",
-    "params": {
-      "protocolVersion": "2025-03-26",
-      "capabilities": {},
-      "clientInfo": {
-        "name": "glpi-mcp-test",
-        "version": "1.0.0"
-      }
-    }
-  }'
+python -m server
 ```
 
-A resposta esperada é `HTTP/1.1 200 OK`, com `content-type: text/event-stream`, um cabeçalho `mcp-session-id` e um evento `message` contendo os dados de inicialização. Anote o valor de `mcp-session-id` retornado: ele será usado nas próximas requisições.
-
-### 3. Informar que o cliente concluiu a inicialização
-
-Substitua `SEU_SESSION_ID` pelo identificador recebido no passo anterior:
-
-```bash
-curl -i \
-  -X POST http://127.0.0.1:8000/mcp \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -H "MCP-Session-Id: SEU_SESSION_ID" \
-  -H "MCP-Protocol-Version: 2025-03-26" \
-  -d '{
-    "jsonrpc": "2.0",
-    "method": "notifications/initialized"
-  }'
-```
-
-Essa notificação não possui `id`, pois não espera uma resposta JSON-RPC com resultado.
-
-### 4. Listar as ferramentas disponíveis
-
-Use o mesmo identificador de sessão:
-
-```bash
-curl -i \
-  -X POST http://127.0.0.1:8000/mcp \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -H "MCP-Session-Id: SEU_SESSION_ID" \
-  -H "MCP-Protocol-Version: 2025-03-26" \
-  -d '{
-    "jsonrpc": "2.0",
-    "id": 2,
-    "method": "tools/list",
-    "params": {}
-  }'
-```
-
-A resposta esperada é `HTTP 200` e um evento contendo `result.tools`. Confira se a lista inclui as ferramentas esperadas, como `glpi_search`, `glpi_get_item`, `glpi_create_ticket` e `glpi_update_ticket`.
-
-### 5. Fazer uma consulta real ao GLPI
-
-Depois de confirmar que as ferramentas aparecem em `tools/list`, conecte um cliente MCP (por exemplo, Claude Desktop) e execute uma consulta de leitura, como uma pesquisa de registros. O resultado depende da conectividade com o GLPI, das credenciais configuradas e das permissões da conta de integração.
-
-> **Importante:** um `GET /mcp` simples não realiza a inicialização do protocolo. Se ele retornar `406 Not Acceptable` com a mensagem `Client must accept text/event-stream`, isso indica que o cabeçalho `Accept: text/event-stream` não foi enviado. Use o fluxo de inicialização por `POST` mostrado acima. Se a sessão expirar ou o servidor for reiniciado, inicialize uma nova sessão e use o novo identificador.
-
-## Ferramentas disponíveis
-
-| Ferramenta | Finalidade |
-|---|---|
-| `glpi_search(itemtype, criteria, limit)` | Pesquisa registros por tipo de item, critérios e limite de resultados. O limite máximo é 100. |
-| `glpi_get_item(itemtype, item_id)` | Consulta um registro pelo tipo e ID. |
-| `glpi_create_ticket(name, content, urgency, ...)` | Cria um chamado no GLPI. |
-| `glpi_update_ticket(ticket_id, fields)` | Atualiza campos de um chamado existente. |
-
-Os tipos de item, critérios de pesquisa e campos aceitos seguem as regras da API GLPI e as permissões da conta utilizada.
-
-## Testes automatizados
-
-Os testes usam `unittest` e mocks para isolar as chamadas HTTP. Não é necessário ter uma instância GLPI nem fornecer credenciais reais.
-
-```bash
-python -m pip install -r requirements.txt
-python -m unittest discover -s tests -v
-```
-
-O GitHub Actions executa a suíte em Python 3.11 e 3.12 nos eventos configurados no workflow do repositório.
-
-## Solução de problemas
-
-| Sintoma | O que verificar |
-|---|---|
-| Erro de conexão com o GLPI | Confirme `GLPI_URL`, DNS, conectividade, firewall e se a API está acessível. |
-| HTTP 401 ou 403 | Confira App-Token, token/credenciais do usuário, configuração da API e permissões da conta no GLPI. |
-| Erro de certificado TLS | Instale/configure a cadeia de certificados confiável. Use `GLPI_VERIFY_TLS=false` somente em ambiente de desenvolvimento controlado. |
-| Cliente não encontra o servidor | Em stdio, valide comando, argumentos, diretório de trabalho e caminhos absolutos. Reinicie o cliente depois de editar a configuração. |
-| Contêiner HTTP inicia, mas não aceita conexões | Confirme `MCP_TRANSPORT=streamable-http`, `MCP_HOST=0.0.0.0`, o mapeamento da porta e os logs do contêiner. |
-| Ferramentas não aparecem | Consulte os logs do processo MCP e confirme que o cliente suporta o transporte configurado. |
-
-## Segurança
-
-Consulte as seções [Implantação remota em VPS](#implantação-remota-em-vps-com-https) e [Conectar o Claude ao servidor remoto](#conectar-o-claude-ao-servidor-remoto) deste README.
-
-- Use uma conta técnica dedicada no GLPI e aplique o princípio do menor privilégio.
-- Nunca versione `.env`, tokens, senhas ou arquivos com credenciais.
-- Mantenha a validação TLS habilitada em produção.
-- Não exponha o endpoint MCP diretamente à Internet nem publique a porta do contêiner em interfaces de rede públicas.
-- Em `streamable-http`, prefira `MCP_HOST=127.0.0.1` quando o proxy estiver no mesmo host. Se o proxy estiver em outro contêiner, use `MCP_HOST=0.0.0.0` somente com `MCP_PROXY_MODE=true`, em uma rede privada compartilhada e sem publicar a porta MCP diretamente no host.
-- Configure o proxy com HTTPS obrigatório, autenticação de cada cliente, autorização por usuário/grupo, limites de requisição e logs de auditoria.
-- Restrinja por firewall/rede o acesso à porta local do MCP para que somente o proxy possa alcançá-la. Não confie apenas em um cabeçalho de identidade enviado pelo cliente.
-- HTTPS protege o tráfego, mas, por si só, não identifica nem autoriza quem pode invocar as ferramentas.
-- Em `streamable-http`, habilite `MCP_AUTH_ENABLED=true` e configure um provedor OIDC confiável; o servidor valida assinatura, emissor, audiência, expiração e escopos dos access tokens. O modo `stdio` continua disponível sem autenticação HTTP.
-- Revogue e gere novamente qualquer token que tenha sido exposto.
-
-
-## Implantação remota em VPS com HTTPS
-
-Esta opção é indicada quando o GLPI-MCP ficará hospedado em uma VPS e será acessado por clientes MCP remotos. A arquitetura utiliza Caddy como proxy reverso, com emissão e renovação automática de certificados TLS.
+O endpoint local será:
 
 ```text
-Claude / cliente MCP
-        |
-      HTTPS :443
-        |
-      Caddy
-        |
-  rede Docker privada
-        |
-    GLPI-MCP
-        |
-     GLPI API
+http://127.0.0.1:8000/mcp
 ```
 
-### Requisitos
+Mantenha o processo em execução enquanto o cliente estiver conectado. Para encerrar, use `Ctrl+C`.
+
+### 3. Conectar um cliente
+
+Configure o cliente MCP para utilizar o transporte HTTP e a URL `http://127.0.0.1:8000/mcp`. A forma de cadastro depende do cliente utilizado.
+
+> **Atenção:** este modo não habilita autenticação OIDC. Ele fica limitado ao loopback da máquina. Não altere o host para `0.0.0.0` nem exponha a porta 8000 em uma rede pública. Para acesso remoto, utilize a implantação HTTPS a seguir.
+
+## Implantar em HTTPS na VPS
+
+Para disponibilizar o GLPI-MCP pela Internet, utilize o Docker Compose incluído no projeto. O Caddy publica HTTPS com certificado automático; o contêiner MCP permanece em rede privada e exige autenticação OIDC.
+
+### Arquitetura e requisitos
 
 - VPS Linux com Docker Engine e Docker Compose v2.
-- Domínio ou subdomínio apontando por DNS para o IP público da VPS (ex.: `mcp.exemplo.com`).
-- Portas TCP 80 e 443 liberadas no firewall da VPS e do provedor. UDP 443 é opcional para HTTP/3.
-- Instância de um provedor de identidade OIDC/OAuth acessível por HTTPS (por exemplo, Keycloak).
-- Conta técnica no GLPI com permissões mínimas necessárias.
+- Domínio/subdomínio apontando para o IP público da VPS.
+- Portas TCP 80 e 443 liberadas no firewall. UDP 443 é opcional.
+- Provedor OIDC externo acessível por HTTPS (por exemplo, Keycloak).
+- Conta técnica do GLPI com permissões mínimas.
 
-### 1. Preparar o provedor de identidade
+### 1. Configurar o provedor OIDC
 
-O GLPI-MCP atua como *resource server*: ele valida tokens de acesso emitidos por um provedor externo. Ele não hospeda uma tela de login nem emite tokens de usuário.
+O GLPI-MCP é um *resource server*: valida access tokens emitidos pelo provedor externo, mas não oferece tela de login nem emite tokens.
 
 Configure o provedor para:
 
-1. Publicar um endereço HTTPS de emissor (*issuer*) e um endpoint JWKS.
+1. Publicar a URL HTTPS do emissor (*issuer*) e o endpoint JWKS.
 2. Emitir access tokens JWT assinados com RS256 ou ES256.
 3. Incluir as claims `iss`, `aud`, `exp` e `scope` (ou `scp`).
-4. Emitir a audiência destinada ao recurso GLPI-MCP, configurada em `OIDC_AUDIENCE`.
-5. Conceder `glpi:read` para pesquisa e consulta; conceder também `glpi:write` para criação e atualização de chamados.
-6. Oferecer Authorization Code com PKCE e os mecanismos de descoberta/registro de cliente exigidos pelo cliente MCP remoto.
+4. Definir uma audiência para o GLPI-MCP, por exemplo `glpi-mcp`.
+5. Conceder `glpi:read` para pesquisa/consulta e `glpi:write` para criação/atualização de chamados.
+6. Suportar o fluxo e os mecanismos de descoberta/registro de cliente exigidos pelo cliente MCP remoto.
 
-Use access tokens, nunca ID tokens, como bearer token. A audiência do token deve corresponder exatamente à configuração do GLPI-MCP.
+Use access tokens como bearer tokens, nunca ID tokens. O provedor deve emitir a audiência configurada no GLPI-MCP.
 
 ### 2. Preparar a VPS
 
-Clone o projeto e crie o arquivo de ambiente:
+Na VPS:
 
 ```bash
 git clone https://github.com/efssantos/glpi-mcp.git
@@ -478,7 +327,7 @@ cd glpi-mcp
 cp .env.example .env
 ```
 
-Edite o arquivo `.env` e configure os dados do GLPI, o domínio público e o provedor OIDC:
+Edite o `.env` com os dados reais:
 
 ```dotenv
 GLPI_URL=https://glpi.exemplo.com
@@ -494,11 +343,11 @@ MCP_READ_SCOPE=glpi:read
 MCP_WRITE_SCOPE=glpi:write
 ```
 
-Os endereços de emissor e JWKS são exemplos: substitua-os pelos endereços exatos publicados pelo seu provedor. Configure nele a audiência do access token para corresponder a `OIDC_AUDIENCE`. Preserve o arquivo `.env`; nunca o envie ao Git nem compartilhe tokens e senhas.
+Substitua os endereços de exemplo pelos valores publicados pelo seu provedor. A audiência do access token deve ser igual a `OIDC_AUDIENCE`. Proteja o arquivo `.env` e não o versione.
 
-### 3. Iniciar os serviços
+### 3. Iniciar a aplicação
 
-Com o DNS apontando para a VPS e as portas 80/443 liberadas:
+Com o DNS apontado para a VPS e as portas liberadas:
 
 ```bash
 docker compose up -d --build
@@ -506,94 +355,144 @@ docker compose ps
 docker compose logs -f caddy glpi-mcp
 ```
 
-O Caddy solicitará e renovará automaticamente o certificado TLS. Os volumes persistentes do Docker armazenam os dados necessários para manter os certificados entre reinicializações.
-
-O endpoint público será:
+O Caddy solicitará e renovará os certificados TLS automaticamente. O endpoint público será:
 
 ```text
 https://mcp.exemplo.com/mcp
 ```
 
-As requisições sem autenticação válida devem ser rejeitadas. O SDK MCP publica os metadados de recurso protegido para orientar o cliente sobre o provedor de autorização configurado.
-
-### 4. Entender o isolamento de rede
-
-- Somente o Caddy publica portas no host: TCP 80 e 443.
-- O contêiner GLPI-MCP não publica a porta 8000 no host.
-- Caddy e GLPI-MCP comunicam-se por uma rede Docker privada.
-- O GLPI-MCP utiliza uma rede de saída separada para alcançar a API do GLPI.
-- No firewall da VPS, mantenha abertas apenas as portas necessárias (80/443; UDP 443 é opcional). Não abra a porta 8000.
-
-### 5. Verificar e operar a instalação
+### 4. Verificar a implantação
 
 ```bash
 docker compose ps
 docker compose logs --tail 100 glpi-mcp
 docker compose logs --tail 100 caddy
-docker compose restart
 ```
 
-Verifique se o domínio apresenta um certificado válido e se o contêiner consegue alcançar os endpoints de descoberta OIDC e JWKS. Teste uma requisição sem token (que deve ser recusada) e outra com access token válido e os escopos necessários.
+Confirme que os dois serviços estão ativos, que o domínio apresenta certificado válido e que o GLPI-MCP consegue alcançar os endpoints OIDC/JWKS e a API do GLPI. Uma chamada sem token válido deve ser recusada; uma chamada autenticada precisa conter os escopos exigidos.
 
-### Segurança e manutenção da VPS
+### Como a rede fica protegida
 
-- Utilize uma conta de integração dedicada no GLPI e limite suas permissões.
-- Restrinja o escopo de escrita a usuários e clientes confiáveis.
-- Faça rotação dos tokens GLPI e das chaves de assinatura OIDC conforme a política da organização.
-- Faça backup do volume `caddy_data` e proteja o arquivo `.env`.
-- Mantenha Docker, Caddy, GLPI-MCP e o provedor de identidade atualizados.
-- HTTPS protege o tráfego; a validação dos tokens OAuth/OIDC e os escopos aplicam autenticação e autorização. Nenhum deles substitui as permissões da conta no GLPI.
+- Somente o Caddy publica as portas 80 e 443 no host.
+- A porta 8000 do GLPI-MCP não é publicada no host.
+- Caddy e GLPI-MCP comunicam-se por rede Docker privada.
+- O GLPI-MCP possui uma rede de saída para acessar o GLPI.
+- Não abra a porta 8000 no firewall da VPS.
 
-## Conectar o Claude ao servidor remoto
+Para atualizar a aplicação após novas versões:
 
-Esta seção considera uma instalação do GLPI-MCP já publicada em HTTPS e protegida por um provedor OIDC, conforme a seção anterior.
+```bash
+git pull
+docker compose up -d --build
+```
 
-### Antes de configurar
+## Conectar clientes MCP
 
-Tenha em mãos:
+O endpoint para clientes remotos é `https://SEU-DOMINIO/mcp`. O cliente precisa suportar MCP por Streamable HTTP e o fluxo de autenticação OAuth/OIDC configurado no provedor.
 
-- Endpoint MCP público, por exemplo `https://mcp.exemplo.com/mcp`.
-- URL do emissor OIDC configurada em `OIDC_ISSUER_URL`.
-- Cliente registrado no provedor de identidade ou um servidor de autorização compatível com o fluxo de registro exigido pelo conector Claude.
-- Audiência do access token igual ao valor de `OIDC_AUDIENCE`.
-- Escopos necessários: `glpi:read` para leitura e `glpi:write` para alterações em chamados.
+No Claude, adicione um conector MCP remoto nas configurações de conectores da conta ou workspace, informe o endpoint HTTPS e conclua a autenticação OAuth. Os nomes e a disponibilidade das opções variam conforme o produto, plano e política do workspace. O provedor de identidade precisa oferecer os metadados e o mecanismo de registro de cliente esperados pelo conector.
 
-O token deve ser um JWT de acesso assinado, e não um ID token. Ele precisa conter emissor, audiência, expiração e escopos válidos; o GLPI-MCP verifica a assinatura usando o endpoint JWKS configurado.
+### Escopos de acesso
 
-### Adicionar o conector remoto
-
-1. Abra as configurações de conectores ou integrações personalizadas do Claude, na conta ou workspace.
-2. Adicione um conector MCP remoto usando o endpoint HTTPS informado acima.
-3. Se solicitado, selecione autenticação OAuth.
-4. Conclua o login e a autorização no provedor de identidade.
-5. Conceda somente os escopos necessários para as tarefas do usuário.
-6. Salve o conector e confirme se as ferramentas do GLPI aparecem na conversa.
-
-Os nomes e a disponibilidade dessas opções podem variar conforme o produto Claude, o plano e as políticas do workspace. Se o fluxo OAuth não concluir a descoberta ou o registro, confira se o provedor publica os metadados OAuth padrão e oferece o método de registro de cliente esperado pelo conector.
-
-### Escopos e permissões
-
-| Escopo | Ferramentas permitidas |
+| Escopo | Permissão |
 |---|---|
-| `glpi:read` | `glpi_search`, `glpi_get_item` |
-| `glpi:write` | `glpi_create_ticket`, `glpi_update_ticket` (também exige `glpi:read`) |
+| `glpi:read` | `glpi_search` e `glpi_get_item` |
+| `glpi:write` | `glpi_create_ticket` e `glpi_update_ticket`; também exige `glpi:read` |
 
-Toda requisição autenticada exige `glpi:read`. As operações de escrita também exigem `glpi:write`. As permissões da conta técnica no GLPI continuam valendo: os escopos OAuth não concedem permissões que essa conta não possui no GLPI.
+A autorização OAuth não substitui as permissões da conta técnica dentro do GLPI. Para uso local com Claude Desktop, prefira a conexão `stdio` descrita na seção [Instalação local](#instalação-local-passo-a-passo).
 
-### Solução de problemas do conector remoto
+## Ferramentas disponíveis
 
-- **Falha na descoberta OAuth:** verifique a URL do emissor e se os metadados do servidor de autorização estão acessíveis publicamente por HTTPS.
-- **Token rejeitado:** confira algoritmo da assinatura, emissor, audiência, expiração e URL JWKS. Confirme que o cliente recebeu um access token, não um ID token.
-- **Ferramentas de leitura funcionam, mas alterações falham:** solicite o escopo `glpi:write` e verifique as permissões da conta técnica no GLPI.
-- **Erro TLS:** confira DNS, firewall nas portas 80/443 e logs do Caddy.
-- **Ferramentas não aparecem:** consulte `docker compose logs glpi-mcp caddy` e confirme o endpoint `/mcp`.
+| Ferramenta | Descrição |
+|---|---|
+| `glpi_search(itemtype, criteria, limit)` | Pesquisa registros por tipo e critérios. Limite entre 1 e 100 resultados. |
+| `glpi_get_item(itemtype, item_id)` | Consulta um registro pelo tipo e identificador. |
+| `glpi_create_ticket(name, content, urgency, ...)` | Cria um chamado, com categoria e entidade opcionais. |
+| `glpi_update_ticket(ticket_id, fields)` | Atualiza campos permitidos de um chamado existente. |
 
-### Claude Desktop local
+A pesquisa recebe `criteria` como uma query string URL-encoded com parâmetros de pesquisa aceitos pela API do GLPI, por exemplo `criteria[0][field]`, `criteria[0][searchtype]` e `criteria[0][value]`. Os campos de atualização são validados por lista de permissões no código.
 
-Para usar o Claude Desktop na mesma máquina em que o GLPI-MCP está instalado, continue utilizando a configuração local via `stdio` apresentada na seção [Conectar a um cliente MCP](#conectar-a-um-cliente-mcp). A implantação remota com OAuth complementa o modo local; não o substitui.
+## Desenvolvimento e contribuição
+
+### Preparar o ambiente
+
+Faça fork/clone do repositório, crie um ambiente virtual e instale as dependências:
+
+```bash
+git clone https://github.com/efssantos/glpi-mcp.git
+cd glpi-mcp
+python -m venv .venv
+```
+
+Ative o ambiente virtual e instale:
+
+```bash
+# Linux/macOS
+source .venv/bin/activate
+
+# Windows PowerShell
+# ..\.venv\Scripts\Activate.ps1
+
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+Configure as variáveis GLPI necessárias para testar manualmente a integração. Os testes automatizados utilizam mocks e não exigem instância GLPI nem credenciais reais.
+
+### Executar os testes
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+Ao contribuir:
+
+1. Crie uma branch a partir de `main` com nome descritivo e em letras minúsculas, usando prefixos como `feat/`, `fix/`, `docs/`, `test/` ou `security/`.
+2. Mantenha a implementação modular: lógica compartilhada em `core/` e integração com o GLPI em `integrations/glpi/`.
+3. Adicione ou atualize testes para novos comportamentos e correções.
+4. Não inclua credenciais, tokens ou arquivos `.env` nos commits.
+5. Abra uma Pull Request descrevendo a motivação, as alterações e como foram testadas.
+
+Padrão de mensagem de commit: `type: action and description`, em letras minúsculas e com verbo de ação no imperativo. Exemplos:
+
+```text
+feat: add asset search tool
+fix: validate ticket update fields
+test: cover oidc token verification
+docs: clarify local http setup
+```
+
+### Diretrizes técnicas
+
+- Preserve a compatibilidade com Python 3.11 e 3.12.
+- Utilize `unittest` e mocks para testes unitários; não dependa de um GLPI real na suíte automatizada.
+- Valide entradas e configuração antes de executar chamadas externas.
+- Preserve mensagens de erro seguras, sem expor tokens ou respostas sensíveis da API.
+- Mantenha os modos `stdio` e `streamable-http` funcionais.
+- Em mudanças de autenticação, cubra validação JWT, emissor, audiência, expiração e escopos.
+
+## Segurança
+
+- Utilize uma conta técnica exclusiva no GLPI e aplique o menor privilégio.
+- Mantenha `GLPI_VERIFY_TLS=true` em produção.
+- Nunca publique o arquivo `.env` nem inclua credenciais em logs ou commits.
+- O modo HTTP sem autenticação é destinado apenas ao loopback local.
+- Para acesso remoto, utilize HTTPS, OIDC e escopos; não exponha diretamente a porta 8000.
+- Faça rotação dos tokens GLPI e proteja os volumes e arquivos de configuração da VPS.
+- Revogue e substitua imediatamente qualquer credencial que tenha sido exposta.
+
+## Solução de problemas
+
+| Sintoma | Verificações |
+|---|---|
+| Falha ao conectar ao GLPI | Confira `GLPI_URL`, DNS, firewall e disponibilidade da API legada. |
+| HTTP 401/403 do GLPI | Confira App-Token, User Token ou credenciais e permissões da conta técnica. |
+| Erro de certificado | Verifique a cadeia de certificados. Não desabilite a validação TLS em produção. |
+| Servidor HTTP não inicia | Confira `MCP_TRANSPORT`, `MCP_HOST`, `MCP_PORT` e as regras de segurança de bind em `core/config.py`. |
+| Token remoto rejeitado | Confira assinatura, algoritmo, emissor, audiência, expiração, JWKS e escopos. |
+| Cliente não lista ferramentas | Confira o endpoint `/mcp`, o transporte suportado pelo cliente e os logs do servidor. |
+| HTTPS não emite certificado | Confira DNS público, portas TCP 80/443 e logs do Caddy. |
 
 ## Licença
 
-Este projeto é distribuído sob a licença MIT. Consulte o arquivo [LICENSE](LICENSE) para ver os termos completos.
-
-
+Este projeto é distribuído sob a licença MIT. Consulte [LICENSE](LICENSE) para os termos completos.
