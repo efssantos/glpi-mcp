@@ -91,7 +91,7 @@ para validar os tokens de acesso recebidos.
 
 - **Caddy** recebe o tráfego público, termina o TLS e encaminha as requisições.
 - **GLPI-MCP** processa o protocolo MCP, valida tokens e executa as ferramentas.
-- **Provedor OAuth/OIDC externo** autentica os usuários e emite token de acessos. Pode ser um serviço gerenciado ou uma instalação própria, por exemplo Keycloak.
+- **Provedor OAuth/OIDC externo** autentica os usuários e emite tokens de acesso. Pode ser um serviço gerenciado ou uma instalação própria, por exemplo Keycloak.
 - **GLPI** continua sendo a fonte de dados e a camada final de permissões.
 
 > **Atenção:** HTTPS protege o tráfego, mas não autentica o usuário. O GLPI-MCP atua como *servidor de recursos*: valida tokens emitidos pelo provedor externo, mas não hospeda login, não emite tokens e não substitui o provedor de identidade.
@@ -130,7 +130,7 @@ Os dois modos disponibilizam as mesmas ferramentas. A diferença é o transporte
 - Domínio ou subdomínio apontando para o IP público da VPS.
 - Portas TCP 80 e 443 liberadas para entrada.
 - Instância GLPI acessível pela VPS.
-- Provedor OAuth/OIDC que emita token de acessos JWT assinados e publique as chaves JWKS.
+- Provedor OAuth/OIDC que emita tokens de acesso JWT assinados e publique as chaves JWKS.
 - Cliente MCP que suporte o fluxo de autenticação remota exigido pelo servidor de autorização.
 
 ## Preparar o GLPI
@@ -212,7 +212,7 @@ Resumo do processo:
 
 1. Preparar a VPS Linux e instalar Docker Engine + Compose v2.
 2. Apontar um domínio para o IP da VPS.
-3. Configurar um provedor OAuth/OIDC para autenticar os usuários e emitir token de acessos.
+3. Configurar um provedor OAuth/OIDC para autenticar os usuários e emitir tokens de acesso.
 4. Clonar o projeto e preencher o `.env` com dados do GLPI, domínio e OIDC.
 5. Liberar TCP 80/443 e iniciar `docker compose up -d --build`.
 6. Validar o certificado HTTPS, a autenticação e a listagem de ferramentas MCP.
@@ -296,7 +296,7 @@ Faça cópia de segurança dos volumes `caddy_data` e `caddy_config`, mantenha o
 | GLPI retorna 401/403 | App-Token, User Token/credenciais, API habilitada e permissões da conta técnica. |
 | VPS não obtém certificado | DNS A/AAAA, TCP 80/443 liberadas no firewall da VPS e do provedor, registros do Caddy. |
 | Endereço de acesso não responde | `docker compose ps`, registros de Caddy e GLPI-MCP, domínio e `MCP_DOMAIN`. |
-| Token remoto rejeitado | Access token (não ID token), assinatura RS256/ES256, emissor, audiência e expiração e URL JWKS. |
+| Token remoto rejeitado | token de acesso (não token de identificação), assinatura RS256/ES256, emissor, audiência, expiração e URL JWKS. |
 | Leitura funciona, escrita não | Escopos `glpi:write` e `glpi:read`, além das permissões da conta GLPI. |
 | Cliente não lista ferramentas | Endereço de acesso terminado em `/mcp`, compatibilidade do cliente com Streamable HTTP/OAuth e registros do servidor. |
 | Erro de conexão com GLPI | DNS, rota de saída, firewall, URL base e disponibilidade de `/apirest.php`. |
