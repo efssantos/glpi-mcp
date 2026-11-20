@@ -99,7 +99,7 @@ class Settings:
             glpi_password=os.getenv("GLPI_PASSWORD") or None,
             glpi_api_path="/" + os.getenv("GLPI_API_PATH", "apirest.php").strip("/"),
             request_timeout=timeout,
-            verify_tls=os.getenv("GLPI_VERIFY_TLS", "true").strip().lower() not in {"0", "false", "no"},
+            verify_tls=_read_bool("GLPI_VERIFY_TLS", "true"),
             mcp_transport=transport,
             mcp_host=host,
             mcp_port=port,
