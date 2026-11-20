@@ -8,6 +8,9 @@ from urllib.request import Request, urlopen
 from .errors import IntegrationError
 
 
+MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+
+
 def request_json(
     url: str,
     *,
@@ -25,7 +28,9 @@ def request_json(
     context = None if verify_tls else ssl._create_unverified_context()
     try:
         with urlopen(request, timeout=timeout, context=context) as response:
-            raw = response.read()
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_RESPONSE_BYTES:
+                raise IntegrationError("GLPI response exceeded the maximum allowed size.")
     except HTTPError as exc:
         # Do not forward the response body: GLPI may include internal details or data.
         raise IntegrationError(f"GLPI returned HTTP {exc.code}.") from None
