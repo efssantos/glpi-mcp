@@ -94,4 +94,4 @@ Esses valores devem corresponder ao realm, hostname e audience configurados no K
 - [ ] Issuer e JWKS acessíveis.
 - [ ] Token validado pelo GLPI-MCP.
 
-Consulte [DEPLOYMENT.md](DEPLOYMENT.md) para implantação e operação da stack.
+Para conectar clientes Claude com OAuth pré-registrado, consulte [CLAUDE.md](CLAUDE.md). Consulte [DEPLOYMENT.md](DEPLOYMENT.md) para implantação e operação da stack.
