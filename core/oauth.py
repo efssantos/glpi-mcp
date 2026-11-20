@@ -36,7 +36,7 @@ class OIDCTokenVerifier(TokenVerifier):
     async def verify_token(self, token: str) -> AccessToken | None:
         try:
             claims = await asyncio.to_thread(self._decode, token)
-        except (jwt.PyJWTError, OSError, ValueError, KeyError):
+        except (jwt.PyJWTError, OSError, ValueError, KeyError, TypeError):
             return None
 
         raw_scopes = claims.get("scope", claims.get("scp", []))
