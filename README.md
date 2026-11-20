@@ -78,7 +78,7 @@ Ative o ambiente virtual:
 
 **Linux/macOS**
 ```bash
-source .venenv/bin/activate
+source .venv/bin/activate
 ```
 
 Instale as dependências:
