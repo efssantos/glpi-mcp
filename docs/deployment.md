@@ -95,7 +95,7 @@ UDP 443 é opcional para HTTP/3. O Compose atual publica essa porta; se não qui
 
 Esta etapa é obrigatória para o acesso remoto. O GLPI-MCP não substitui um provedor de identidade. Você pode usar um serviço de identidade gerenciado ou hospedar uma solução como Keycloak, desde que ela atenda aos requisitos abaixo.
 
-Configure o provedor para:
+Ajuste o provedor para:
 
 1. Publicar metadados de autorização OAuth/OIDC por HTTPS.
 2. Publicar um endereço de acesso JWKS HTTPS com as chaves públicas de assinatura.
@@ -118,7 +118,7 @@ Guarde estes valores para configurar o GLPI-MCP:
 
 - URL exata do emissor (`iss`).
 - URL HTTPS do endereço de acesso JWKS.
-- Audience que será incluída nos tokens de acesso.
+- Audiência que será incluída nos tokens de acesso.
 - Mapeamento de escopos para usuários/clientes.
 - Configuração de cliente/registro e URI de redirecionamento exigida pelo cliente MCP.
 
