@@ -102,6 +102,48 @@ class GLPIToolTests(unittest.TestCase):
                 invalid_mcp.tools["glpi_search"]("Ticket")
             client_class.assert_not_called()
 
+    def test_http_read_tools_reject_write_only_scope(self):
+        settings = make_settings(mcp_auth_enabled=True)
+        mcp = FakeMCP()
+        register_glpi_tools(mcp, settings)
+        token = MagicMock(scopes=["glpi:write"])
+        with patch("integrations.glpi.tools.GLPIClient") as client_class, \
+             patch("core.authorization.get_access_token", return_value=token):
+            for name, args in (("glpi_search", ("Ticket",)), ("glpi_get_item", ("Ticket", 1))):
+                with self.subTest(tool=name), self.assertRaisesRegex(PermissionError, "glpi:read"):
+                    mcp.tools[name](*args)
+            client_class.assert_not_called()
+
+    def test_http_write_tools_reject_read_only_scope(self):
+        settings = make_settings(mcp_auth_enabled=True)
+        mcp = FakeMCP()
+        register_glpi_tools(mcp, settings)
+        token = MagicMock(scopes=["glpi:read"])
+        with patch("integrations.glpi.tools.GLPIClient") as client_class, \
+             patch("core.authorization.get_access_token", return_value=token):
+            with self.assertRaisesRegex(PermissionError, "glpi:write"):
+                mcp.tools["glpi_create_ticket"]("Title", "Description")
+            with self.assertRaisesRegex(PermissionError, "glpi:write"):
+                mcp.tools["glpi_update_ticket"](1, {"name": "Changed"})
+            client_class.assert_not_called()
+
+    def test_http_tools_reject_missing_token_before_glpi_calls(self):
+        settings = make_settings(mcp_auth_enabled=True)
+        mcp = FakeMCP()
+        register_glpi_tools(mcp, settings)
+        with patch("integrations.glpi.tools.GLPIClient") as client_class, \
+             patch("core.authorization.get_access_token", return_value=None):
+            calls = (
+                ("glpi_search", ("Ticket",)),
+                ("glpi_get_item", ("Ticket", 1)),
+                ("glpi_create_ticket", ("Title", "Description")),
+                ("glpi_update_ticket", (1, {"name": "Changed"})),
+            )
+            for name, args in calls:
+                with self.subTest(tool=name), self.assertRaisesRegex(PermissionError, "authenticated"):
+                    mcp.tools[name](*args)
+            client_class.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
