@@ -25,12 +25,12 @@ A documentação do projeto está organizada para ajudar desde quem está conhec
 
 | Documento | Conteúdo |
 |---|---|
-| [Guia de implantação em VPS](docs/deployment.md) | Instalação completa em servidor próprio: requisitos, domínio, DNS, firewall, provedor de identidade, configuração, HTTPS, inicialização, validação, manutenção e remoção. |
+| [Guia de implantação em VPS](docs/implantação.md) | Instalação completa em servidor próprio: requisitos, domínio, DNS, firewall, provedor de identidade, configuração, HTTPS, inicialização, validação, manutenção e remoção. |
 | [Guia de integração com Claude](docs/claude-integration.md) | Como conectar o Claude a uma instância remota, entender a autenticação, configurar permissões e validar as ferramentas. |
 
 **Por onde começar?**
 - Para entender o projeto e executar localmente, continue lendo este README.
-- Para hospedar sua própria instância em uma VPS, siga o [guia de implantação](docs/deployment.md).
+- Para hospedar sua própria instância em uma VPS, siga o [guia de implantação](docs/implantação.md).
 - Para conectar o Claude à instalação remota, consulte o [guia de integração](docs/claude-integration.md).
 
 ---
@@ -62,14 +62,14 @@ Claude Desktop ou outro cliente MCP
        API REST do GLPI
 ```
 
-Nesse modo, o cliente inicia o processo GLPI-MCP na própria máquina. Não existe endpoint público, proxy ou porta de entrada para o MCP.
+Nesse modo, o cliente inicia o processo GLPI-MCP na própria máquina. Não existe endereço de acesso público, proxy ou porta de entrada para o MCP.
 
 ### Arquitetura remota em VPS
 
 ```text
 Claude / cliente MCP
         |
-        | HTTPS (TCP 443) + access token
+        | HTTPS (TCP 443) + token de acesso
         v
    Internet / DNS
         |
@@ -91,7 +91,7 @@ para validar os tokens de acesso recebidos.
 
 - **Caddy** recebe o tráfego público, termina o TLS e encaminha as requisições.
 - **GLPI-MCP** processa o protocolo MCP, valida tokens e executa as ferramentas.
-- **Provedor OAuth/OIDC externo** autentica os usuários e emite access tokens. Pode ser um serviço gerenciado ou uma instalação própria, por exemplo Keycloak.
+- **Provedor OAuth/OIDC externo** autentica os usuários e emite token de acessos. Pode ser um serviço gerenciado ou uma instalação própria, por exemplo Keycloak.
 - **GLPI** continua sendo a fonte de dados e a camada final de permissões.
 
 > **Atenção:** HTTPS protege o tráfego, mas não autentica o usuário. O GLPI-MCP atua como *servidor de recursos*: valida tokens emitidos pelo provedor externo, mas não hospeda login, não emite tokens e não substitui o provedor de identidade.
@@ -130,7 +130,7 @@ Os dois modos disponibilizam as mesmas ferramentas. A diferença é o transporte
 - Domínio ou subdomínio apontando para o IP público da VPS.
 - Portas TCP 80 e 443 liberadas para entrada.
 - Instância GLPI acessível pela VPS.
-- Provedor OAuth/OIDC que emita access tokens JWT assinados e publique as chaves JWKS.
+- Provedor OAuth/OIDC que emita token de acessos JWT assinados e publique as chaves JWKS.
 - Cliente MCP que suporte o fluxo de autenticação remota exigido pelo servidor de autorização.
 
 ## Preparar o GLPI
@@ -206,17 +206,17 @@ Em produção local, normalmente o próprio Claude Desktop inicia o processo. Co
 
 ## Implantar em uma VPS com HTTPS
 
-O procedimento detalhado está no [Guia de implantação em VPS](docs/deployment.md). O documento cobre preparação do servidor, domínio e DNS, firewall, provedor de identidade, configuração do ambiente, HTTPS, inicialização, validação e manutenção.
+O procedimento detalhado está no [Guia de implantação em VPS](docs/implantação.md). O documento cobre preparação do servidor, domínio e DNS, firewall, provedor de identidade, configuração do ambiente, HTTPS, inicialização, validação e manutenção.
 
 Resumo do processo:
 
 1. Preparar a VPS Linux e instalar Docker Engine + Compose v2.
 2. Apontar um domínio para o IP da VPS.
-3. Configurar um provedor OAuth/OIDC para autenticar os usuários e emitir access tokens.
+3. Configurar um provedor OAuth/OIDC para autenticar os usuários e emitir token de acessos.
 4. Clonar o projeto e preencher o `.env` com dados do GLPI, domínio e OIDC.
 5. Liberar TCP 80/443 e iniciar `docker compose up -d --build`.
 6. Validar o certificado HTTPS, a autenticação e a listagem de ferramentas MCP.
-7. Cadastrar o endpoint `https://SEU-DOMINIO/mcp` no cliente MCP.
+7. Cadastrar o endereço de acesso `https://SEU-DOMINIO/mcp` no cliente MCP.
 
 A imagem isolada do GLPI-MCP não fornece HTTPS. Na implantação remota, o Compose executa Caddy e GLPI-MCP juntos; somente Caddy publica portas no host.
 
@@ -225,7 +225,7 @@ A imagem isolada do GLPI-MCP não fornece HTTPS. Na implantação remota, o Comp
 | Porta | Direção | Uso |
 |---|---|---|
 | TCP 80 | Entrada pública na VPS | Validação de domínio/certificado Let's Encrypt e redirecionamento para HTTPS. |
-| TCP 443 | Entrada pública na VPS | Endpoint MCP HTTPS. |
+| TCP 443 | Entrada pública na VPS | Endereço de acesso MCP HTTPS. |
 | UDP 443 | Entrada pública, opcional | HTTP/3 no Caddy. |
 | TCP 8000 | Apenas rede Docker interna | Comunicação Caddy → GLPI-MCP. Não publicar no host nem liberar no firewall. |
 | TCP 443 | Saída da VPS | Acesso HTTPS à API GLPI e ao provedor OIDC/JWKS, se esses serviços usarem HTTPS. |
@@ -262,9 +262,9 @@ Use caminhos absolutos e não suponha que o cliente carregará automaticamente o
 
 ### Claude remoto
 
-Depois de concluir a implantação da VPS, cadastre um conector MCP remoto usando o endpoint HTTPS e conclua a autenticação OAuth oferecida pelo provedor de identidade. Consulte o [Guia de integração com Claude](docs/claude-integration.md) para ver o procedimento de conexão, autenticação, permissões e validação.
+Depois de concluir a implantação da VPS, cadastre um conector MCP remoto usando o endereço de acesso HTTPS e conclua a autenticação OAuth oferecida pelo provedor de identidade. Consulte o [Guia de integração com Claude](docs/claude-integration.md) para ver o procedimento de conexão, autenticação, permissões e validação.
 
-A disponibilidade e os nomes dos menus do Claude podem variar por produto, plano e política do workspace. O suporte ao fluxo OAuth deve ser validado com o provedor escolhido antes de considerar a instalação pronta para produção.
+A disponibilidade e os nomes dos menus do Claude podem variar por produto, plano e política do espaço de trabalho. O suporte ao fluxo OAuth deve ser validado com o provedor escolhido antes de considerar a instalação pronta para produção.
 
 ## Testes e manutenção
 
@@ -281,24 +281,24 @@ Com Docker Compose:
 
 ```bash
 docker compose ps
-docker compose logs --tail 100 glpi-mcp caddy
+docker compose registros --tail 100 glpi-mcp caddy
 docker compose restart
 docker compose pull
 docker compose up -d
 ```
 
-Faça backup dos volumes `caddy_data` e `caddy_config`, mantenha o sistema atualizado e planeje a rotação dos tokens GLPI e das chaves do provedor de identidade.
+Faça cópia de segurança dos volumes `caddy_data` e `caddy_config`, mantenha o sistema atualizado e planeje a rotação dos tokens GLPI e das chaves do provedor de identidade.
 
 ## Solução de problemas
 
 | Sintoma | Verificações |
 |---|---|
 | GLPI retorna 401/403 | App-Token, User Token/credenciais, API habilitada e permissões da conta técnica. |
-| VPS não obtém certificado | DNS A/AAAA, TCP 80/443 liberadas no firewall da VPS e do provedor, logs do Caddy. |
-| Endpoint não responde | `docker compose ps`, logs de Caddy e GLPI-MCP, domínio e `MCP_DOMAIN`. |
+| VPS não obtém certificado | DNS A/AAAA, TCP 80/443 liberadas no firewall da VPS e do provedor, registros do Caddy. |
+| Endereço de acesso não responde | `docker compose ps`, registros de Caddy e GLPI-MCP, domínio e `MCP_DOMAIN`. |
 | Token remoto rejeitado | Access token (não ID token), assinatura RS256/ES256, emissor, audiência e expiração e URL JWKS. |
 | Leitura funciona, escrita não | Escopos `glpi:write` e `glpi:read`, além das permissões da conta GLPI. |
-| Cliente não lista ferramentas | Endpoint terminado em `/mcp`, compatibilidade do cliente com Streamable HTTP/OAuth e logs do servidor. |
+| Cliente não lista ferramentas | Endereço de acesso terminado em `/mcp`, compatibilidade do cliente com Streamable HTTP/OAuth e registros do servidor. |
 | Erro de conexão com GLPI | DNS, rota de saída, firewall, URL base e disponibilidade de `/apirest.php`. |
 
 ## Segurança
@@ -309,7 +309,7 @@ Faça backup dos volumes `caddy_data` e `caddy_config`, mantenha o sistema atual
 - Não publique a porta 8000 nem exponha diretamente o contêiner MCP.
 - Na VPS, mantenha Caddy e GLPI-MCP em redes Docker privadas conforme o Compose.
 - Habilite autenticação OIDC no modo remoto e conceda somente os escopos necessários.
-- Proteja e faça backup dos volumes persistentes do Caddy.
+- Proteja e faça cópia de segurança dos volumes persistentes do Caddy.
 - HTTPS cifra a conexão; OAuth autentica o cliente; escopos limitam ferramentas; as permissões GLPI continuam limitando as operações sobre os dados.
 
 ## Licença
