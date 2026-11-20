@@ -77,9 +77,9 @@ class GLPIClientTests(unittest.TestCase):
 
     def test_search_rejects_malformed_or_unsupported_criteria_before_network(self):
         invalid_criteria = (
-            "criteria[0][field]=1&",
+            "criteria[0][field]",
             "foo=bar",
-            "criteria[0][value]=x",
+            "criteria[0][unsupported]=x",
             "criteria[0][field]=1&criteria[0][value]=" + ("x" * 1001),
         )
         with patch("integrations.glpi.client.request_json") as request_json:
