@@ -5,7 +5,7 @@ Este documento mostra como conectar o Claude a uma instância do GLPI-MCP hosped
 ## 1. Pré-requisitos
 
 - GLPI-MCP em execução na VPS.
-- Endpoint público com certificado HTTPS válido, por exemplo `https://mcp.exemplo.com/mcp`.
+- Endereço de acesso público com certificado HTTPS válido, por exemplo `https://mcp.exemplo.com/mcp`.
 - Provedor OAuth/OIDC configurado e acessível por HTTPS.
 - Tokens de acesso JWT com emissor, audiência, expiração e escopos compatíveis.
 - Provedor configurado para o fluxo OAuth esperado pelo cliente Claude, incluindo descoberta/registro de cliente quando aplicável.
@@ -47,7 +47,7 @@ Os nomes e a disponibilidade das opções variam conforme o produto Claude, o pl
 7. Salve a conexão.
 8. Abra uma conversa e confirme se as ferramentas GLPI aparecem disponíveis.
 
-Endpoint de exemplo:
+Endereço de acesso de exemplo:
 
 ```text
 https://mcp.exemplo.com/mcp
@@ -71,12 +71,12 @@ Teste criação e atualização em ambiente controlado, nunca em chamados de pro
 | Sintoma | Causa provável / ação |
 |---|---|
 | Claude não conclui OAuth | Verifique descoberta de metadados, registro de cliente, URI de redirecionamento e compatibilidade do provedor com o fluxo esperado pelo Claude. |
-| Endpoint inacessível | Verifique DNS, certificado, TCP 443, Caddy e o caminho `/mcp`. |
+| Endereço de acesso inacessível | Verifique DNS, certificado, TCP 443, Caddy e o caminho `/mcp`. |
 | HTTP 401 | Token ausente, expirado, assinatura inválida, emissor/audiência incorretos ou token não é token de acesso. |
 | Ferramentas de leitura funcionam, escrita falha | O token não tem `glpi:write` ou a conta técnica não tem permissão no GLPI. |
 | Ferramentas não aparecem | Confira endereço de acesso, transporte HTTP com transmissão contínua, registros do GLPI-MCP e compatibilidade do cliente. |
 
-Logs na VPS:
+Registros na VPS:
 
 ```bash
 docker compose registros --tail 100 glpi-mcp caddy
