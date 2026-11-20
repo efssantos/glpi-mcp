@@ -172,7 +172,7 @@ Esta é a opção indicada para quem quer usar o GLPI-MCP no próprio computador
 
 \`\`\`powershell
 py -3.12 -m venv .venv
-.\\.venv\\Scripts\\Activate.ps1
+..\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 \`\`\`
@@ -226,9 +226,9 @@ No arquivo de configuração do Claude Desktop, inclua o servidor em \`mcpServer
 {
   "mcpServers": {
     "glpi": {
-      "command": "C:\\\\caminho\\\\glpi-mcp\\\\.venv\\\\Scripts\\\\python.exe",
+      "command": "C:\\caminho\\glpi-mcp\\.venv\\Scripts\\python.exe",
       "args": ["-m", "server"],
-      "cwd": "C:\\\\caminho\\\\glpi-mcp",
+      "cwd": "C:\\caminho\\glpi-mcp",
       "env": {
         "GLPI_URL": "https://glpi.exemplo.com",
         "GLPI_APP_TOKEN": "seu-app-token",
@@ -431,7 +431,7 @@ Ative o ambiente virtual e instale:
 source .venv/bin/activate
 
 # Windows PowerShell
-# .\\.venv\\Scripts\\Activate.ps1
+# ..\.venv\Scripts\Activate.ps1
 
 python -m pip install --upgrade pip
 pip install -r requirements.txt
