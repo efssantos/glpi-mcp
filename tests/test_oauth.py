@@ -66,5 +66,65 @@ class OIDCTokenVerifierTests(unittest.TestCase):
         self.assertIsNone(asyncio.run(OIDCTokenVerifier(settings).verify_token("invalid")))
 
 
+    @patch("core.oauth.jwt.decode")
+    @patch("core.oauth.PyJWKClient")
+    def test_accepts_scopes_from_scp_array(self, jwks_class, decode):
+        jwks_class.return_value.get_signing_key_from_jwt.return_value.key = "public-key"
+        decode.return_value = {
+            "iss": "https://identity.example.test",
+            "aud": "glpi-mcp",
+            "sub": "user-123",
+            "exp": 2000000000,
+            "scp": ["glpi:read", "glpi:write"],
+        }
+        settings = make_settings(
+            mcp_auth_enabled=True,
+            mcp_public_url="https://mcp.example.test/mcp",
+            oidc_issuer_url="https://identity.example.test",
+            oidc_jwks_url="https://identity.example.test/certs",
+            oidc_audience="glpi-mcp",
+        )
+        result = asyncio.run(OIDCTokenVerifier(settings).verify_token("signed-token"))
+        self.assertEqual(result.scopes, ["glpi:read", "glpi:write"])
+
+    @patch("core.oauth.jwt.decode")
+    @patch("core.oauth.PyJWKClient")
+    def test_rejects_scope_array_with_non_string_entries(self, jwks_class, decode):
+        jwks_class.return_value.get_signing_key_from_jwt.return_value.key = "public-key"
+        decode.return_value = {
+            "iss": "https://identity.example.test",
+            "aud": "glpi-mcp",
+            "sub": "user-123",
+            "exp": 2000000000,
+            "scope": ["glpi:read", 7],
+        }
+        settings = make_settings(
+            mcp_auth_enabled=True,
+            mcp_public_url="https://mcp.example.test/mcp",
+            oidc_issuer_url="https://identity.example.test",
+            oidc_jwks_url="https://identity.example.test/certs",
+            oidc_audience="glpi-mcp",
+        )
+        self.assertIsNone(asyncio.run(OIDCTokenVerifier(settings).verify_token("signed-token")))
+
+    @patch("core.oauth.jwt.decode")
+    @patch("core.oauth.PyJWKClient")
+    def test_rejects_token_without_client_identity(self, jwks_class, decode):
+        jwks_class.return_value.get_signing_key_from_jwt.return_value.key = "public-key"
+        decode.return_value = {
+            "iss": "https://identity.example.test",
+            "aud": "glpi-mcp",
+            "exp": 2000000000,
+            "scope": "glpi:read",
+        }
+        settings = make_settings(
+            mcp_auth_enabled=True,
+            mcp_public_url="https://mcp.example.test/mcp",
+            oidc_issuer_url="https://identity.example.test",
+            oidc_jwks_url="https://identity.example.test/certs",
+            oidc_audience="glpi-mcp",
+        )
+        self.assertIsNone(asyncio.run(OIDCTokenVerifier(settings).verify_token("signed-token")))
+
 if __name__ == "__main__":
     unittest.main()
