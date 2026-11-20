@@ -94,6 +94,11 @@ class SettingsTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 Settings.from_env()
 
+    def test_rejects_invalid_tls_boolean_values(self):
+        with patch.dict("os.environ", {"GLPI_VERIFY_TLS": "maybe"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "GLPI_VERIFY_TLS must be a boolean"):
+                Settings.from_env()
+
     def test_rejects_invalid_boolean_values(self):
         with patch.dict("os.environ", {"MCP_AUTH_ENABLED": "sometimes"}, clear=True):
             with self.assertRaisesRegex(ValueError, "boolean"):

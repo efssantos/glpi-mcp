@@ -38,6 +38,20 @@ class OIDCTokenVerifierTests(unittest.TestCase):
         self.assertEqual(result.resource, "https://mcp.example.test/mcp")
         decode.assert_called_once()
 
+    @patch("core.oauth.jwt.decode", side_effect=TypeError("malformed claims"))
+    @patch("core.oauth.PyJWKClient")
+    def test_rejects_malformed_claims(self, jwks_class, decode):
+        jwks_class.return_value.get_signing_key_from_jwt.return_value.key = "public-key"
+        settings = make_settings(
+            mcp_auth_enabled=True,
+            mcp_public_url="https://mcp.example.test/mcp",
+            oidc_issuer_url="https://identity.example.test",
+            oidc_jwks_url="https://identity.example.test/certs",
+            oidc_audience="glpi-mcp",
+        )
+        self.assertIsNone(asyncio.run(OIDCTokenVerifier(settings).verify_token("malformed")))
+
+
     @patch("core.oauth.jwt.decode", side_effect=jwt.InvalidTokenError("invalid"))
     @patch("core.oauth.PyJWKClient")
     def test_rejects_invalid_token(self, jwks_class, decode):

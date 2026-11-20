@@ -1,6 +1,7 @@
 """GLPI MCP tools."""
 
 from typing import Any
+from contextlib import contextmanager
 
 from core.config import Settings
 from core.auth import validate_glpi_settings
@@ -19,6 +20,21 @@ FIELD_RANGES = {
     "status": (1, 6),
 }
 REFERENCE_FIELDS = {"itilcategories_id", "entities_id", "requesttypes_id", "locations_id"}
+
+
+@contextmanager
+def _managed_client(client: GLPIClient):
+    """Close the client without masking an active operation exception."""
+    try:
+        yield client
+    except BaseException:
+        try:
+            client.close()
+        except Exception:
+            pass
+        raise
+    else:
+        client.close()
 
 
 def _positive_id(value: int | None, field_name: str) -> None:
@@ -63,10 +79,8 @@ def register_glpi_tools(mcp: Any, settings: Settings) -> None:
         if not isinstance(criteria, str):
             raise ValueError("criteria must be text.")
         client = GLPIClient(settings)
-        try:
+        with _managed_client(client):
             return client.search(itemtype, criteria=criteria, limit=limit)
-        finally:
-            client.close()
 
     @mcp.tool()
     def glpi_get_item(itemtype: str, item_id: int) -> object:
@@ -77,10 +91,8 @@ def register_glpi_tools(mcp: Any, settings: Settings) -> None:
             raise ValueError("itemtype must be non-empty text with at most 100 characters.")
         _positive_id(item_id, "item_id")
         client = GLPIClient(settings)
-        try:
+        with _managed_client(client):
             return client.get(itemtype, item_id)
-        finally:
-            client.close()
 
     @mcp.tool()
     def glpi_create_ticket(name: str, content: str, *, urgency: int = 3,
@@ -96,10 +108,8 @@ def register_glpi_tools(mcp: Any, settings: Settings) -> None:
             fields["entities_id"] = entities_id
         _validate_ticket_fields(fields)
         client = GLPIClient(settings)
-        try:
+        with _managed_client(client):
             return client.create("Ticket", fields)
-        finally:
-            client.close()
 
     @mcp.tool()
     def glpi_update_ticket(ticket_id: int, fields: dict[str, Any]) -> object:
@@ -113,7 +123,5 @@ def register_glpi_tools(mcp: Any, settings: Settings) -> None:
             raise ValueError("The ticket ID is supplied separately; omit id from fields.")
         _validate_ticket_fields(fields)
         client = GLPIClient(settings)
-        try:
+        with _managed_client(client):
             return client.update("Ticket", ticket_id, fields)
-        finally:
-            client.close()

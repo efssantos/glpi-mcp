@@ -33,6 +33,14 @@ class HTTPHelperTests(unittest.TestCase):
             request_json("https://example.test/api")
 
     @patch("core.http.urlopen")
+    def test_rejects_oversized_response(self, urlopen):
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = b"x" * (4 * 1024 * 1024 + 1)
+        urlopen.return_value = response
+        with self.assertRaisesRegex(IntegrationError, "maximum allowed size"):
+            request_json("https://example.test/api")
+
+    @patch("core.http.urlopen")
     def test_translates_http_errors(self, urlopen):
         urlopen.side_effect = HTTPError("https://example.test", 401, "Unauthorized", {}, io.BytesIO(b"bad token"))
         with self.assertRaisesRegex(IntegrationError, "HTTP 401") as context:
