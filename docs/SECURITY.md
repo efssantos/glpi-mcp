@@ -1,93 +1,85 @@
 # Segurança
 
-Este documento reúne controles recomendados para instalar, configurar e operar o GLPI-MCP com segurança.
+Este documento reúne controles recomendados para implantação e operação segura do GLPI-MCP.
 
 ## Princípios
 
-- Privilégio mínimo para a conta técnica do GLPI e para usuários do provedor de identidade.
+- Privilégio mínimo para contas GLPI e identidade.
 - Segredos fora do controle de versão.
 - HTTPS em toda comunicação remota.
 - Autenticação obrigatória no endpoint remoto.
-- Autorização por scopes, além das permissões internas do GLPI.
+- Scopes separados de leitura e escrita.
 - Containers e redes com exposição mínima.
-- Atualizações, monitoramento e rotação de credenciais.
+- Atualizações, monitoramento, backups e rotação de credenciais.
 
-## Credenciais do GLPI
+## Credenciais GLPI
 
-- Utilize uma conta de integração dedicada.
-- Conceda apenas as permissões necessárias às ferramentas MCP.
-- Prefira User Token em vez de senha, quando disponível e adequado.
-- Mantenha App-Token e User Token protegidos.
-- Habilite validação TLS (`GLPI_VERIFY_TLS=true`) em produção.
-- Rotacione tokens seguindo processo controlado e atualize os serviços dependentes.
+- Utilize conta de integração dedicada e com permissões mínimas.
+- Prefira User Token quando adequado.
+- Proteja App-Token e User Token.
+- Mantenha validação TLS habilitada.
+- Rotacione credenciais conforme processo controlado.
 
-## Segredos e repositório
+## Segredos
 
-- Não versionar `.env`, tokens, senhas, client secrets, chaves privadas ou dumps de dados.
-- Versionar apenas arquivos de exemplo com placeholders, como `.env.example`.
-- Não inserir segredos em documentação, screenshots, logs, issues ou PRs.
-- Use armazenamento de segredos da plataforma/infraestrutura quando disponível.
-- Limite permissões de leitura do arquivo de ambiente no host.
+- Não versionar `.env`, tokens, senhas, client secrets, chaves privadas ou dumps.
+- Versionar somente exemplos com placeholders.
+- Use secrets manager quando disponível.
+- Restrinja permissões do arquivo de ambiente no host.
 
-## OIDC, JWT e scopes
+O `.env` contém também as credenciais bootstrap do Keycloak e senha do banco. Utilize valores fortes e únicos, proteja o arquivo e não o compartilhe.
 
-Na implantação remota:
+## OIDC/JWT
 
-- Configure issuer, JWKS e audience usando endpoints HTTPS confiáveis.
-- Use access tokens, não ID tokens, para chamadas ao recurso MCP.
-- O servidor valida a assinatura do JWT, issuer, audience, expiração e scopes.
-- Use scopes de leitura e escrita separados.
-- Operações de escrita exigem scopes apropriados e não devem ser liberadas apenas por autenticação.
-- A autorização OAuth não substitui a autorização dentro do GLPI.
-
-Não aceite tokens de emissores não confiáveis ou tokens com audience diferente do recurso. Não desabilite verificações para contornar erros de configuração.
+- Configure issuer, JWKS e audience com endpoints HTTPS confiáveis.
+- Use access tokens para chamadas MCP.
+- Valide assinatura, issuer, audience, expiração e scopes.
+- Não desabilite validações para contornar falhas.
+- Scopes OAuth não substituem permissões GLPI.
 
 ## Rede e proxy
 
 - Publique somente o proxy HTTPS.
-- Não exponha diretamente a porta MCP 8000.
-- Restrinja SSH ao conjunto de IPs de administração sempre que possível.
-- Não exponha o banco de dados ou interfaces administrativas do Keycloak à Internet.
-- Use redes Docker separadas e comunicação interna entre serviços.
-- Configure o proxy para encaminhar apenas aos upstreams necessários.
-- Mantenha TLS e certificados válidos.
+- Não exponha diretamente as portas 8000, 8080 ou 5432.
+- Restrinja SSH.
+- PostgreSQL fica em rede interna Docker, sem acesso do proxy.
+- Keycloak participa da rede interna do banco e da rede do proxy; o proxy encaminha ao serviço na porta 8080.
+- GLPI-MCP não recebe porta publicada no host.
+- Mantenha DNS, TLS e proxy corretamente configurados.
 
-## Containers
+O hostname público de identidade encaminha para o Keycloak e inclui o console administrativo, que exige autenticação. Se a política da instalação exigir restrição adicional ao console, aplique controles de acesso no proxy ou na rede administrativa, validando que endpoints OIDC públicos necessários continuem acessíveis.
 
-A configuração de Compose do projeto usa controles de hardening para o serviço MCP:
+## Containers e hardening
 
-- Filesystem read-only, com `tmpfs` para arquivos temporários.
-- Capabilities removidas (`cap_drop: ALL`) e `no-new-privileges`.
-- Healthcheck TCP local para verificar se a porta de serviço está aceitando conexões.
-- Limites de recursos configurados para MCP e Caddy via Compose.
-- Rotação de logs Docker (`json-file`) limitada a 10 MB por arquivo e 3 arquivos.
+O Compose fornece controles para GLPI-MCP:
 
-O healthcheck TCP verifica apenas se a porta está aceitando conexões; não representa uma validação funcional do protocolo MCP nem da conectividade com GLPI/OIDC. Os limites de CPU e memória são valores de referência do Compose e podem ser ajustados conforme a carga e os recursos disponíveis no host.
+- Filesystem read-only e `tmpfs` para temporários.
+- Capabilities removidas e `no-new-privileges`.
+- Healthcheck TCP (não é verificação completa do protocolo MCP).
+- Limites de CPU e memória de referência.
+- Rotação de logs Docker.
 
-Não remova esses controles sem avaliar a necessidade. Evite montar diretórios do host com acesso amplo no container. Utilize imagens atualizadas e versões confiáveis.
+Keycloak e PostgreSQL têm limites de recursos e logs rotacionados. O banco usa rede Docker interna e volume persistente. Avalie limites de recursos conforme a carga e o tamanho da VPS.
 
-## Logs e informações sensíveis
+## Dados e logs
 
-- Não registre bearer tokens, senhas ou client secrets.
-- Evite logs de conteúdo de chamados que possa conter dados pessoais ou confidenciais.
-- Restrinja acesso aos logs e defina retenção adequada.
-- Ao compartilhar logs para diagnóstico, remova tokens, URLs privadas e dados identificáveis.
+- Não registre tokens, senhas ou client secrets.
+- Evite registrar conteúdo de chamados e dados pessoais.
+- Restrinja acesso e retenção de logs.
+- Redija dados sensíveis antes de compartilhar logs.
 
-## Testes de segurança básicos
+## Verificações pós-deploy
 
-Após implantação:
-
-1. Requisição sem token deve ser rejeitada.
-2. Token inválido deve ser rejeitado.
-3. Token expirado deve ser rejeitado.
-4. Token com issuer incorreto deve ser rejeitado.
-5. Token com audience incorreta deve ser rejeitado.
-6. Usuário sem scope de leitura não deve executar consultas.
-7. Usuário sem scope de escrita não deve executar operações de alteração.
-8. Token com scopes válidos deve permitir somente as ações autorizadas.
-9. Confirme que a porta MCP não está diretamente acessível externamente.
-10. Confirme que certificados HTTPS estão válidos.
+1. Requisição sem token é recusada.
+2. Token inválido/expirado é recusado.
+3. Issuer e audience incorretos são recusados.
+4. Scope ausente bloqueia ferramenta.
+5. Scopes válidos permitem somente ações autorizadas.
+6. Porta 8000 não está acessível externamente.
+7. Portas 8080 e 5432 não estão publicadas.
+8. TLS válido nos hostnames MCP e identidade.
+9. Backups de PostgreSQL e volumes Caddy estão configurados e restauração testada.
 
 ## Incidentes e rotação
 
-Se uma credencial for exposta, considere-a comprometida: revogue ou rotacione imediatamente, atualize o serviço, investigue o uso, remova o segredo do histórico quando aplicável e verifique acessos. Não reutilize credenciais comprometidas.
+Credencial exposta deve ser considerada comprometida. Revogue/rotacione, atualize serviços, investigue uso, remova segredos do histórico quando aplicável e verifique acessos. Não reutilize credenciais comprometidas.
