@@ -2,7 +2,7 @@
 
 Servidor **Model Context Protocol (MCP)** em Python que integra clientes de IA à API REST legada do GLPI (`apirest.php`). Permite pesquisar registros, consultar itens e criar/atualizar chamados usando uma conta técnica configurada no GLPI.
 
-O GLPI-MCP suporta execução local via `stdio` e acesso remoto via Streamable HTTP. Para uso remoto, a arquitetura de referência utiliza HTTPS (Caddy), autenticação OIDC (Keycloak ou provedor compatível) e autorização por scopes.
+O GLPI-MCP suporta execução local via `stdio` e acesso remoto via Streamable HTTP. Para uso remoto, a stack Docker Compose inclui Caddy (HTTPS), Keycloak (OIDC), PostgreSQL para persistência de identidade e o GLPI-MCP, com autorização por scopes.
 
 > Esta implementação utiliza a API REST legada do GLPI. Não é uma integração com a API REST v2.
 
@@ -11,7 +11,7 @@ O GLPI-MCP suporta execução local via `stdio` e acesso remoto via Streamable H
 | Guia | Descrição |
 |---|---|
 | [Arquitetura](docs/ARCHITECTURE.md) | Componentes, fluxos, autenticação e redes. |
-| [Implantação em VPS](docs/DEPLOYMENT.md) | Tutorial de instalação remota, DNS, firewall, Docker, HTTPS e validação. |
+| [Implantação em VPS](docs/DEPLOYMENT.md) | Tutorial de instalação remota, DNS, firewall, Compose, HTTPS e validação. |
 | [Configuração do Keycloak](docs/KEYCLOAK.md) | Realm, client, scopes, audience e usuário de teste. |
 | [Segurança](docs/SECURITY.md) | Credenciais, OIDC, scopes, rede, containers e verificações de segurança. |
 
@@ -25,22 +25,26 @@ Todos os domínios e credenciais dos exemplos são fictícios. Substitua-os por 
 - Transporte HTTP Streamable.
 - Autenticação remota com validação de access token OIDC/JWT.
 - Autorização por scopes de leitura e escrita.
-- Docker Compose com Caddy para publicação HTTPS.
+- Stack Compose integrada com GLPI-MCP, Keycloak, PostgreSQL e Caddy.
+- HTTPS para os endpoints MCP e de identidade.
 - Controles de hardening do container MCP.
 
 ## Arquitetura resumida
 
 ```text
 Cliente MCP
-   | stdio (local) ou HTTPS/Streamable HTTP (remoto)
+   | HTTPS/Streamable HTTP
    v
-GLPI-MCP -- OIDC/JWKS --> Provedor de identidade
-   |
-   v
-API REST legada do GLPI
+Caddy (hosts MCP e identidade)
+   |                  |
+   v                  v
+GLPI-MCP          Keycloak
+   |                  |
+   v                  v
+GLPI API          PostgreSQL
 ```
 
-Na implantação remota, o Caddy atua como proxy HTTPS e o serviço MCP fica em uma rede Docker sem publicação direta da porta 8000. Consulte [Arquitetura](docs/ARCHITECTURE.md) para detalhes.
+Na implantação remota, o Compose provisiona todos os serviços. Caddy atua como proxy HTTPS; as portas do GLPI-MCP, Keycloak e PostgreSQL não são publicadas diretamente no host. Consulte [Arquitetura](docs/ARCHITECTURE.md) para detalhes.
 
 ## Pré-requisitos
 
@@ -55,9 +59,9 @@ Na implantação remota, o Caddy atua como proxy HTTPS e o serviço MCP fica em 
 
 - VPS Linux.
 - Docker Engine e Docker Compose v2.
-- Domínio e registros DNS apontando para a VPS.
+- Domínios e registros DNS para MCP e autenticação apontando para a VPS.
 - Portas 80 e 443 liberadas.
-- Provedor OIDC configurado e acessível por HTTPS.
+- Acesso ao GLPI com API REST habilitada.
 
 ## Início rápido — execução local
 
@@ -78,7 +82,7 @@ Ative o ambiente virtual:
 
 **Linux/macOS**
 ```bash
-source .venv/bin/activate
+source .venenv/bin/activate
 ```
 
 Instale as dependências:
@@ -92,7 +96,7 @@ pip install -r requirements.txt
 Configure as variáveis de ambiente na sessão do terminal. Exemplo PowerShell:
 
 ```powershell
-$env:GLPI_URL = "https://glpi.exemplo.com.br"
+$env:GLPI_URL = "https://glpi.example.com"
 $env:GLPI_API_PATH = "/apirest.php"
 $env:GLPI_APP_TOKEN = "SEU_APP_TOKEN"
 $env:GLPI_USER_TOKEN = "SEU_USER_TOKEN"
@@ -102,7 +106,7 @@ $env:MCP_TRANSPORT = "stdio"
 No Linux/macOS:
 
 ```bash
-export GLPI_URL="https://glpi.exemplo.com.br"
+export GLPI_URL="https://glpi.example.com"
 export GLPI_API_PATH="/apirest.php"
 export GLPI_APP_TOKEN="SEU_APP_TOKEN"
 export GLPI_USER_TOKEN="SEU_USER_TOKEN"
@@ -123,7 +127,7 @@ Exemplo para Claude Desktop (ajuste o caminho de instalação e os valores ao se
       "args": ["-m", "server"],
       "cwd": "C:\\CAMINHO\\glpi-mcp",
       "env": {
-        "GLPI_URL": "https://glpi.exemplo.com.br",
+        "GLPI_URL": "https://glpi.example.com",
         "GLPI_APP_TOKEN": "SEU_APP_TOKEN",
         "GLPI_USER_TOKEN": "SEU_USER_TOKEN",
         "MCP_TRANSPORT": "stdio"
@@ -135,7 +139,7 @@ Exemplo para Claude Desktop (ajuste o caminho de instalação e os valores ao se
 
 Reinicie o cliente e confirme se as ferramentas MCP estão disponíveis. O processo `stdio` é iniciado e gerenciado pelo cliente.
 
-> Consulte o [tutorial completo](docs/DEPLOYMENT.md) para HTTP local e implantação remota HTTPS.
+> Consulte o [tutorial completo](docs/DEPLOYMENT.md) para transporte HTTP local e implantação remota HTTPS integrada.
 
 ## Transporte HTTP local
 
@@ -199,9 +203,9 @@ docs: improve deployment guide
 - Use conta técnica GLPI dedicada com privilégio mínimo.
 - Mantenha `GLPI_VERIFY_TLS=true`.
 - Não versione arquivos de ambiente ou credenciais.
-- Não exponha a porta MCP 8000 na Internet.
+- Não exponha as portas MCP 8000, Keycloak 8080 ou PostgreSQL 5432 na Internet.
 - Para implantação remota, use HTTPS e autenticação OIDC.
-- Restrinja portas administrativas, atualize sistema/container e rotacione tokens.
+- Restrinja portas administrativas, atualize imagens/container e rotacione tokens.
 
 Consulte [SECURITY.md](docs/SECURITY.md).
 
@@ -214,7 +218,7 @@ Consulte [SECURITY.md](docs/SECURITY.md).
 | Servidor HTTP não inicia | Transporte, host, porta e variáveis MCP. |
 | Token remoto recusado | Assinatura, issuer, audience, expiração, JWKS e scopes. |
 | Cliente não lista ferramentas | Endpoint `/mcp`, transporte suportado, autenticação e logs. |
-| Caddy não emite certificado | DNS, portas TCP 80/443 e logs do Caddy. |
+| Caddy não emite certificado | DNS dos dois hosts, portas TCP 80/443 e logs do Caddy. |
 
 ## Licença
 
