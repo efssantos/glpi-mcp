@@ -119,7 +119,7 @@ docker compose logs -f keycloak keycloak-db glpi-mcp caddy
 
 Acesse o console administrativo em `https://auth.example.com` e entre usando o administrador bootstrap definido no `.env`. Configure realm, client, scopes e audience conforme [KEYCLOAK.md](KEYCLOAK.md).
 
-O Keycloak já é provisionado pelo Compose. Não crie uma segunda stack nem outro container de Keycloak.
+O Keycloak já é provisionado pelo Compose. Não crie uma segunda stack nem outro container de Keycloak. Para conectar o Claude usando um cliente OAuth pré-registrado, siga [CLAUDE.md](CLAUDE.md).
 
 ## 8. Validar DNS e HTTPS
 
