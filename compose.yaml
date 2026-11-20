@@ -69,6 +69,14 @@ services:
     expose:
       - "8000"
     environment:
+      GLPI_URL: ${GLPI_URL:?Set GLPI_URL in .env}
+      GLPI_API_PATH: ${GLPI_API_PATH:-/apirest.php}
+      GLPI_APP_TOKEN: ${GLPI_APP_TOKEN:-}
+      GLPI_USER_TOKEN: ${GLPI_USER_TOKEN:-}
+      GLPI_USERNAME: ${GLPI_USERNAME:-}
+      GLPI_PASSWORD: ${GLPI_PASSWORD:-}
+      GLPI_TIMEOUT: ${GLPI_TIMEOUT:-30}
+      GLPI_VERIFY_TLS: ${GLPI_VERIFY_TLS:-true}
       MCP_TRANSPORT: streamable-http
       MCP_HOST: 0.0.0.0
       MCP_PORT: 8000
@@ -78,8 +86,9 @@ services:
       OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:?Set OIDC_ISSUER_URL in .env}
       OIDC_JWKS_URL: ${OIDC_JWKS_URL:?Set OIDC_JWKS_URL in .env}
       OIDC_AUDIENCE: ${OIDC_AUDIENCE:?Set OIDC_AUDIENCE in .env}
-    env_file:
-      - .env
+      MCP_READ_SCOPE: ${MCP_READ_SCOPE:-glpi:read}
+      MCP_WRITE_SCOPE: ${MCP_WRITE_SCOPE:-glpi:write}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     read_only: true
     tmpfs:
       - /tmp
