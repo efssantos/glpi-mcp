@@ -54,9 +54,17 @@ Não aceite tokens de emissores não confiáveis ou tokens com audience diferent
 
 ## Containers
 
-A configuração de Compose do projeto usa controles de hardening para o serviço MCP, como filesystem read-only, tmpfs para temporários, remoção de capabilities e `no-new-privileges`. Não remova essas opções sem avaliar a necessidade.
+A configuração de Compose do projeto usa controles de hardening para o serviço MCP:
 
-Evite montar diretórios do host com acesso amplo no container. Utilize imagens atualizadas e versões confiáveis.
+- Filesystem read-only, com `tmpfs` para arquivos temporários.
+- Capabilities removidas (`cap_drop: ALL`) e `no-new-privileges`.
+- Healthcheck TCP local para verificar se a porta de serviço está aceitando conexões.
+- Limites de recursos configurados para MCP e Caddy via Compose.
+- Rotação de logs Docker (`json-file`) limitada a 10 MB por arquivo e 3 arquivos.
+
+O healthcheck TCP verifica apenas se a porta está aceitando conexões; não representa uma validação funcional do protocolo MCP nem da conectividade com GLPI/OIDC. Os limites de CPU e memória são valores de referência do Compose e podem ser ajustados conforme a carga e os recursos disponíveis no host.
+
+Não remova esses controles sem avaliar a necessidade. Evite montar diretórios do host com acesso amplo no container. Utilize imagens atualizadas e versões confiáveis.
 
 ## Logs e informações sensíveis
 
