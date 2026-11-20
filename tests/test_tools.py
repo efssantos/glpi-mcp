@@ -94,6 +94,45 @@ class GLPIToolTests(unittest.TestCase):
             self.mcp.tools["glpi_create_ticket"]("Title", "Description", urgency=0)
         client_class.assert_not_called()
 
+    def test_ticket_fields_validate_ranges_text_lengths_and_reference_ids(self):
+        invalid_updates = (
+            {"impact": 0},
+            {"impact": 6},
+            {"priority": 0},
+            {"priority": 7},
+            {"status": 0},
+            {"status": 7},
+            {"locations_id": 0},
+            {"requesttypes_id": -1},
+            {"entities_id": True},
+            {"name": ""},
+            {"name": "x" * 256},
+            {"content": " "},
+            {"content": "x" * 10001},
+        )
+        with patch("integrations.glpi.tools.GLPIClient") as client_class:
+            update = self.mcp.tools["glpi_update_ticket"]
+            for fields in invalid_updates:
+                with self.subTest(fields=list(fields)), self.assertRaises(ValueError):
+                    update(2, fields)
+            client_class.assert_not_called()
+
+    def test_create_ticket_rejects_invalid_text_and_reference_ids(self):
+        invalid_inputs = (
+            ("", "Description", 3, None),
+            ("Title", " ", 3, None),
+            ("x" * 256, "Description", 3, None),
+            ("Title", "x" * 10001, 3, None),
+            ("Title", "Description", 3, 0),
+            ("Title", "Description", 3, True),
+        )
+        with patch("integrations.glpi.tools.GLPIClient") as client_class:
+            create = self.mcp.tools["glpi_create_ticket"]
+            for name, content, urgency, category in invalid_inputs:
+                with self.subTest(name=name[:15]), self.assertRaises(ValueError):
+                    create(name, content, urgency=urgency, itilcategories_id=category)
+            client_class.assert_not_called()
+
     def test_tools_validate_settings_before_creating_client(self):
         invalid_mcp = FakeMCP()
         register_glpi_tools(invalid_mcp, make_settings(glpi_user_token=None, glpi_username=None, glpi_password=None))
@@ -137,7 +176,7 @@ class GLPIToolTests(unittest.TestCase):
                 ("glpi_search", ("Ticket",)),
                 ("glpi_get_item", ("Ticket", 1)),
                 ("glpi_create_ticket", ("Title", "Description")),
-                ("glpi_update_ticket", (1, {"name": "Changed"})),
+                ("glpi_update_ticket", (1, {"name": "Changed}))),
             )
             for name, args in calls:
                 with self.subTest(tool=name), self.assertRaisesRegex(PermissionError, "authenticated"):
