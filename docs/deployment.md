@@ -102,7 +102,7 @@ Ajuste o provedor para:
 3. Emitir **tokens de acesso JWT** assinados com RS256 ou ES256.
 4. Incluir os declarações `iss`, `aud` e `exp`.
 5. Incluir os escopos em `escopo` (texto separado por espaços) ou `scp` (lista de textos).
-6. Emitir a audiência destinada ao GLPI-MCP, igual ao valor configurado em `OIDC_AUDIENCE`.
+6. Incluir nos tokens a audiência destinada ao GLPI-MCP, igual ao valor configurado em `OIDC_AUDIENCE`.
 7. Permitir que o cliente MCP obtenha um token de acesso para esse recurso. O fluxo de autorização, PKCE, descoberta de metadados e registro de cliente deve ser compatível com o cliente utilizado.
 
 Escopos recomendados:
@@ -169,7 +169,7 @@ MCP_WRITE_SCOPE=glpi:write
 LOG_LEVEL=INFO
 ```
 
-Substitua todos os exemplos pelos endereços e credenciais reais. Os caminhos de emissor e JWKS variam conforme o provedor; copie os valores exatos publicados por ele. O valor de `OIDC_AUDIENCE` deve coincidir com a audiência dos tokens de acesso.
+Substitua todos os exemplos pelos endereços e credenciais reais. Os endereços do emissor e do serviço JWKS variam conforme o provedor; copie os valores exatos publicados por ele. O valor de `OIDC_AUDIENCE` deve coincidir com a audiência dos tokens de acesso.
 
 O Compose define o modo remoto, ativa a autenticação e configura a escuta interna do servidor. Não é necessário alterar manualmente `MCP_TRANSPORT`, `MCP_HOST`, `MCP_PROXY_MODE` ou `MCP_AUTH_ENABLED` para essa implantação.
 
