@@ -19,6 +19,22 @@ O GLPI-MCP pode ser executado localmente, iniciado pelo cliente MCP via `stdio`,
 - [Solução de problemas](#solução-de-problemas)
 - [Segurança](#segurança)
 
+## Documentação
+
+A documentação do projeto está organizada para ajudar desde quem está conhecendo a aplicação até quem deseja manter sua própria instalação.
+
+| Documento | Conteúdo |
+|---|---|
+| [Guia de implantação em VPS](docs/deployment.md) | Instalação completa em servidor próprio: requisitos, domínio, DNS, firewall, provedor de identidade, configuração, HTTPS, inicialização, validação, manutenção e remoção. |
+| [Guia de integração com Claude](docs/claude-integration.md) | Como conectar o Claude a uma instância remota, entender a autenticação, configurar permissões e validar as ferramentas. |
+
+**Por onde começar?**
+- Para entender o projeto e executar localmente, continue lendo este README.
+- Para hospedar sua própria instância em uma VPS, siga o [guia de implantação](docs/deployment.md).
+- Para conectar o Claude à instalação remota, consulte o [guia de integração](docs/claude-integration.md).
+
+---
+
 ## Visão geral e funcionamento
 
 O GLPI-MCP é uma camada intermediária entre um cliente compatível com MCP e o GLPI. O assistente não acessa diretamente o banco de dados nem recebe as credenciais administrativas do GLPI: ele solicita uma ferramenta ao servidor MCP, e o servidor executa a operação pela API REST.
@@ -27,8 +43,8 @@ O GLPI-MCP é uma camada intermediária entre um cliente compatível com MCP e o
 
 1. O usuário pede algo ao assistente, por exemplo: consultar um chamado.
 2. O cliente MCP identifica que deve chamar uma ferramenta do GLPI-MCP.
-3. O GLPI-MCP recebe a chamada pelo transporte configurado (`stdio` ou `Streamable HTTP`).
-4. No modo remoto, o servidor valida o access token JWT e os escopos OAuth exigidos.
+3. O GLPI-MCP recebe a chamada pelo transporte configurado (`stdio` ou `HTTP com transmissão contínua`).
+4. No modo remoto, o servidor valida o token de acesso JWT e os escopos OAuth exigidos.
 5. O servidor valida os parâmetros e verifica se a operação é permitida.
 6. O cliente interno chama a API REST do GLPI usando os tokens da conta técnica configurada no servidor.
 7. O GLPI aplica as permissões dessa conta e devolve o resultado.
@@ -70,7 +86,7 @@ Claude / cliente MCP
    API REST do GLPI
 
 GLPI-MCP também consulta o provedor OIDC/JWKS
-para validar os access tokens recebidos.
+para validar os tokens de acesso recebidos.
 ```
 
 - **Caddy** recebe o tráfego público, termina o TLS e encaminha as requisições.
@@ -78,7 +94,7 @@ para validar os access tokens recebidos.
 - **Provedor OAuth/OIDC externo** autentica os usuários e emite access tokens. Pode ser um serviço gerenciado ou uma instalação própria, por exemplo Keycloak.
 - **GLPI** continua sendo a fonte de dados e a camada final de permissões.
 
-> **Atenção:** HTTPS protege o tráfego, mas não autentica o usuário. O GLPI-MCP atua como *resource server*: valida tokens emitidos pelo provedor externo, mas não hospeda login, não emite tokens e não substitui o provedor de identidade.
+> **Atenção:** HTTPS protege o tráfego, mas não autentica o usuário. O GLPI-MCP atua como *servidor de recursos*: valida tokens emitidos pelo provedor externo, mas não hospeda login, não emite tokens e não substitui o provedor de identidade.
 
 ## Ferramentas disponíveis
 
@@ -121,8 +137,8 @@ Os dois modos disponibilizam as mesmas ferramentas. A diferença é o transporte
 
 1. Acesse o GLPI com uma conta administradora.
 2. Habilite a API REST legada nas configurações da instalação.
-3. Gere um App-Token, quando exigido pela configuração da API.
-4. Gere um User Token para uma conta técnica dedicada ou configure usuário e senha exclusivos para a integração.
+3. Gere um token de aplicação, quando exigido pela configuração da API.
+4. Gere um token de usuário para uma conta técnica dedicada ou configure usuário e senha exclusivos para a integração.
 5. Conceda à conta técnica somente as permissões necessárias para pesquisar, consultar e gerenciar chamados.
 6. Confirme que a VPS ou máquina local consegue acessar a URL do GLPI.
 
@@ -190,7 +206,7 @@ Em produção local, normalmente o próprio Claude Desktop inicia o processo. Co
 
 ## Implantar em uma VPS com HTTPS
 
-O passo a passo completo, incluindo preparação do provedor OIDC, DNS, firewall, configuração do `.env`, inicialização, validação e manutenção, está em **[Guia de implantação em VPS](docs/deployment.md)**.
+O procedimento detalhado está no [Guia de implantação em VPS](docs/deployment.md). O documento cobre preparação do servidor, domínio e DNS, firewall, provedor de identidade, configuração do ambiente, HTTPS, inicialização, validação e manutenção.
 
 Resumo do processo:
 
@@ -246,7 +262,7 @@ Use caminhos absolutos e não suponha que o cliente carregará automaticamente o
 
 ### Claude remoto
 
-Depois de concluir a implantação da VPS, cadastre um conector MCP remoto usando o endpoint HTTPS e conclua a autenticação OAuth oferecida pelo provedor de identidade. O procedimento detalhado e os requisitos de compatibilidade estão em [Integração com Claude remoto](docs/claude-integration.md).
+Depois de concluir a implantação da VPS, cadastre um conector MCP remoto usando o endpoint HTTPS e conclua a autenticação OAuth oferecida pelo provedor de identidade. Consulte o [Guia de integração com Claude](docs/claude-integration.md) para ver o procedimento de conexão, autenticação, permissões e validação.
 
 A disponibilidade e os nomes dos menus do Claude podem variar por produto, plano e política do workspace. O suporte ao fluxo OAuth deve ser validado com o provedor escolhido antes de considerar a instalação pronta para produção.
 
@@ -280,7 +296,7 @@ Faça backup dos volumes `caddy_data` e `caddy_config`, mantenha o sistema atual
 | GLPI retorna 401/403 | App-Token, User Token/credenciais, API habilitada e permissões da conta técnica. |
 | VPS não obtém certificado | DNS A/AAAA, TCP 80/443 liberadas no firewall da VPS e do provedor, logs do Caddy. |
 | Endpoint não responde | `docker compose ps`, logs de Caddy e GLPI-MCP, domínio e `MCP_DOMAIN`. |
-| Token remoto rejeitado | Access token (não ID token), assinatura RS256/ES256, issuer, audience, expiração e URL JWKS. |
+| Token remoto rejeitado | Access token (não ID token), assinatura RS256/ES256, emissor, audiência e expiração e URL JWKS. |
 | Leitura funciona, escrita não | Escopos `glpi:write` e `glpi:read`, além das permissões da conta GLPI. |
 | Cliente não lista ferramentas | Endpoint terminado em `/mcp`, compatibilidade do cliente com Streamable HTTP/OAuth e logs do servidor. |
 | Erro de conexão com GLPI | DNS, rota de saída, firewall, URL base e disponibilidade de `/apirest.php`. |
