@@ -3,7 +3,7 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-from core.errors import ConfigurationError
+from core.errors import ConfigurationError, IntegrationError
 from integrations.glpi.tools import register_glpi_tools
 from tests.helpers import make_settings
 
@@ -37,6 +37,15 @@ class GLPIToolTests(unittest.TestCase):
         result = self.mcp.tools["glpi_search"]("Ticket", "", 10)
         self.assertEqual(result, [{"id": 1}])
         client.search.assert_called_once_with("Ticket", criteria="", limit=10)
+        client.close.assert_called_once()
+
+    @patch("integrations.glpi.tools.GLPIClient")
+    def test_primary_operation_error_is_not_masked_by_close_error(self, client_class):
+        client = client_class.return_value
+        client.search.side_effect = IntegrationError("search failed")
+        client.close.side_effect = IntegrationError("close failed")
+        with self.assertRaisesRegex(IntegrationError, "search failed"):
+            self.mcp.tools["glpi_search"]("Ticket")
         client.close.assert_called_once()
 
     @patch("integrations.glpi.tools.GLPIClient")
