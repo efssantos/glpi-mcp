@@ -176,7 +176,7 @@ class GLPIToolTests(unittest.TestCase):
                 ("glpi_search", ("Ticket",)),
                 ("glpi_get_item", ("Ticket", 1)),
                 ("glpi_create_ticket", ("Title", "Description")),
-                ("glpi_update_ticket", (1, {"name": "Changed}))),
+                ("glpi_update_ticket", (1, {"name": "Changed"}))),
             )
             for name, args in calls:
                 with self.subTest(tool=name), self.assertRaisesRegex(PermissionError, "authenticated"):
