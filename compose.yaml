@@ -25,6 +25,27 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    healthcheck:
+      # TCP probe: confirms the listener is accepting connections, not full MCP readiness.
+      test:
+        - CMD
+        - python
+        - -c
+        - "import socket; s=socket.create_connection(('127.0.0.1', 8000), timeout=2); s.close()"
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - backend
       - egress
@@ -45,6 +66,16 @@ services:
       - caddy_config:/config
     depends_on:
       - glpi-mcp
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - backend
       - edge
