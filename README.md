@@ -13,6 +13,7 @@ O GLPI-MCP suporta execução local via `stdio` e acesso remoto via Streamable H
 | [Arquitetura](docs/ARCHITECTURE.md) | Componentes, fluxos, autenticação e redes. |
 | [Implantação em VPS](docs/DEPLOYMENT.md) | Tutorial de instalação remota, DNS, firewall, Compose, HTTPS e validação. |
 | [Configuração do Keycloak](docs/KEYCLOAK.md) | Realm, client, scopes, audience e usuário de teste. |
+| [Conectar ao Claude](docs/CLAUDE.md) | Configuração de cliente OAuth pré-registrado para conectar Claude ao GLPI-MCP. |
 | [Segurança](docs/SECURITY.md) | Credenciais, OIDC, scopes, rede, containers e verificações de segurança. |
 
 Todos os domínios e credenciais dos exemplos são fictícios. Substitua-os por valores de sua infraestrutura.
