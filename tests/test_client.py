@@ -68,6 +68,32 @@ class GLPIClientTests(unittest.TestCase):
         call = request_json.call_args_list[1]
         self.assertEqual(call.args[0], "https://glpi.example.test/apirest.php/search/IT%20Asset?range=0-99&criteria%5B0%5D%5Bfield%5D=1&criteria%5B0%5D%5Bsearchtype%5D=contains&criteria%5B0%5D%5Bvalue%5D=printer")
 
+    def test_search_rejects_invalid_limits_before_network(self):
+        with patch("integrations.glpi.client.request_json") as request_json:
+            for limit in (0, 101, -1, True, 1.5, "10"):
+                with self.subTest(limit=limit), self.assertRaises(ValueError):
+                    self.client.search("Ticket", limit=limit)
+            request_json.assert_not_called()
+
+    def test_search_rejects_malformed_or_unsupported_criteria_before_network(self):
+        invalid_criteria = (
+            "criteria[0][field]=1&",
+            "foo=bar",
+            "criteria[0][value]=x",
+            "criteria[0][field]=1&criteria[0][value]=" + ("x" * 1001),
+        )
+        with patch("integrations.glpi.client.request_json") as request_json:
+            for criteria in invalid_criteria:
+                with self.subTest(criteria=criteria[:30]), self.assertRaises(ValueError):
+                    self.client.search("Ticket", criteria=criteria)
+            request_json.assert_not_called()
+
+    def test_search_rejects_oversized_criteria_before_network(self):
+        with patch("integrations.glpi.client.request_json") as request_json:
+            with self.assertRaisesRegex(ValueError, "4096"):
+                self.client.search("Ticket", criteria="x" * 4097)
+            request_json.assert_not_called()
+
     @patch("integrations.glpi.client.request_json")
     def test_create_and_update_wrap_fields_in_input(self, request_json):
         request_json.side_effect = [{"session_token": "s"}, {"id": 9}, {"id": 9}]
